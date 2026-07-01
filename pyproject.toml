@@ -6,7 +6,22 @@ build-backend = "setuptools.build_meta"
 name = "anki-auto"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+	"genanki",
+	"openai",
+	"pydantic",
+	"python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+	"pylint",
+	"pytest",
+	"ruff",
+]
+
+[project.scripts]
+anki-auto = "anki_auto.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
