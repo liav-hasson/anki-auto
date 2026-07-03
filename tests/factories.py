@@ -12,39 +12,33 @@ def card_kwargs(**overrides: Any) -> dict[str, Any]:
 
     values: dict[str, Any] = {
         "source": "sleep",
-        "front_core_es": "dormir",
-        "back_core_fr": "dormir",
+        "target_core": "dormir",
+        "origin_core": "dormir",
         "examples": [
             {
-                "fr": "Je dors huit heures.",
-                "es": "Duermo ocho horas.",
+                "target": "Je dors huit heures.",
+                "origin": "Duermo ocho horas.",
             },
             {
-                "fr": "Elle dort mal ce soir.",
-                "es": "Ella duerme mal esta noche.",
+                "target": "Elle dort mal ce soir.",
+                "origin": "Ella duerme mal esta noche.",
             },
         ],
         "word_family": [
-            {"fr": "un sommeil", "en": "sleep", "note": None},
-            {"fr": "dormi", "en": "slept", "note": "past participle"},
+            {"target": "un sommeil", "gloss": "sleep", "note": None},
+            {"target": "dormi", "gloss": "slept", "note": "past participle"},
         ],
         "related_vocab": [
-            {"fr": "se réveiller", "en": "to wake up", "nuance": "opposite action"},
-            {"fr": "une chambre", "en": "a bedroom", "nuance": "place for sleep"},
+            {"target": "se réveiller", "gloss": "to wake up", "nuance": "opposite action"},
+            {"target": "une chambre", "gloss": "a bedroom", "nuance": "place for sleep"},
         ],
         "key_collocations": [
-            {"fr": "dormir bien", "en": "to sleep well", "note": None},
+            {"target": "dormir bien", "gloss": "to sleep well", "note": None},
         ],
         "register_notes": [
             "common irregular present forms vary by subject."
         ],
-        "usage_forms": [
-            {"fr": "je dors", "en": "I sleep", "note": "present tense"},
-            {"fr": "tu dors", "en": "you sleep", "note": "present tense"},
-            {"fr": "il dort", "en": "he sleeps", "note": "present tense"},
-        ],
         "note_examples": ["Le bébé dort déjà.", "Elle a bien dormi."],
-        "tags": ["French", " verb "],
     }
     values.update(overrides)
     return values
@@ -64,6 +58,5 @@ def empty_note_section_kwargs() -> dict[str, list[Any]]:
         "related_vocab": [],
         "key_collocations": [],
         "register_notes": [],
-        "usage_forms": [],
         "note_examples": [],
     }

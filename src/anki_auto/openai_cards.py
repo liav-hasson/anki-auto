@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from openai import OpenAI
 
+from .config import PromptConfig
 from .models import GeneratedCard
-from .prompt import build_card_messages, build_response_format
+from .prompt import build_card_messages
 
 
 @dataclass(frozen=True)
 class OpenAICardGenerator:
-    """Generate French Anki cards with OpenAI structured JSON output."""
+    """Generate Anki cards with OpenAI structured output."""
 
+    prompt_config: PromptConfig
+    minimal_cards: bool = False
     model: str = "gpt-4.1-mini"
+    api_key: str | None = None
     client: OpenAI | None = None
 
     def generate(self, item: str) -> GeneratedCard:
@@ -25,43 +28,24 @@ class OpenAICardGenerator:
         if not cleaned_item:
             raise ValueError("input item must not be blank")
 
-        client = self.client or OpenAI()
-        content = self._request_card_json(client, cleaned_item)
-        card = GeneratedCard.model_validate_json(content)
+        client = self.client or OpenAI(api_key=self.api_key)
+        card = self._request_card(client, cleaned_item)
         if card.source != cleaned_item:
             card = card.model_copy(update={"source": cleaned_item})
         return card
 
-    def _request_card_json(self, client: OpenAI, item: str) -> str:
-        messages = build_card_messages(item)
-        try:
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                response_format=build_response_format(),
-            )
-        except TypeError:
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-            )
-
-        content = response.choices[0].message.content
-        if not content:
-            raise ValueError("OpenAI returned an empty card response")
-
-        return _extract_json_object(content)
-
-
-def _extract_json_object(content: str) -> str:
-    """Return a JSON object string, tolerating accidental fenced output."""
-
-    stripped = content.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        stripped = "\n".join(lines[1:-1]).strip()
-
-    parsed = json.loads(stripped)
-    if not isinstance(parsed, dict):
-        raise ValueError("OpenAI card response must be a JSON object")
-    return json.dumps(parsed, ensure_ascii=False)
+    def _request_card(self, client: OpenAI, item: str) -> GeneratedCard:
+        messages = build_card_messages(
+            item,
+            self.prompt_config,
+            minimal_cards=self.minimal_cards,
+        )
+        completion = client.chat.completions.parse(
+            model=self.model,
+            messages=messages,
+            response_format=GeneratedCard,
+        )
+        card = completion.choices[0].message.parsed
+        if card is None:
+            raise ValueError("OpenAI refused to return a structured card")
+        return card

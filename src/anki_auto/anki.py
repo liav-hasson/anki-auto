@@ -17,12 +17,21 @@ from .models import (
     RelatedVocabEntry,
     TranslationEntry,
 )
+from .options import PackagingOptions
 
 
 FIELD_NAMES = ["FrontText", "BackText", "BackAudio"]
 NOTE_EXAMPLE_STYLE = "color: #39ff14; font-style: italic;"
 SECTION_BREAK = "<br><br>"
 LINE_BREAK = "<br>"
+
+NOTE_SECTION_LABELS = {
+    "word_family": "Word family",
+    "related_vocab": "Related vocab",
+    "key_collocations": "Key collocations",
+    "register_notes": "Register and usage notes",
+    "note_examples": "Examples",
+}
 
 
 @dataclass(frozen=True)
@@ -31,6 +40,19 @@ class PackagedCard:
 
     card: GeneratedCard
     audio_paths: tuple[Path, ...] = field(default_factory=tuple)
+
+
+def slug(value: str) -> str:
+    """Lowercase text with runs of non-alphanumerics collapsed to single hyphens."""
+
+    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+
+
+def build_card_tags(target_language: str, cefr_level: str) -> list[str]:
+    """Build the two deterministic, namespaced Anki tags for every card."""
+
+    return [f"lang::{slug(target_language)}", f"level::{slug(cefr_level)}"]
+
 
 
 def stable_int_id(value: str) -> int:
@@ -46,8 +68,8 @@ def stable_note_guid(card: GeneratedCard) -> str:
     return genanki.guid_for(
         "front-text-back-text-v2",
         card.source,
-        card.front_core_es,
-        card.back_core_fr,
+        card.origin_core,
+        card.target_core,
     )
 
 
@@ -64,11 +86,11 @@ def stable_audio_filename(
     example = card.examples[example_index - 1]
     digest = hashlib.sha1(
         "\n".join(
-            [card.source, card.back_core_fr, str(example_index), example.fr]
+            [card.source, card.target_core, str(example_index), example.target]
         ).encode("utf-8")
     ).hexdigest()[:16]
-    slug = re.sub(r"[^a-z0-9]+", "-", card.source.lower()).strip("-")[:40]
-    prefix = slug or "card"
+    source_slug = re.sub(r"[^a-z0-9]+", "-", card.source.lower()).strip("-")[:40]
+    prefix = source_slug or "card"
     return f"anki-auto-{prefix}-{example_index}-{digest}{extension}"
 
 
@@ -106,6 +128,9 @@ def build_note(
     card: GeneratedCard,
     model: genanki.Model,
     audio_filenames: list[str] | None = None,
+    *,
+    tags: list[str] | None = None,
+    minimal_cards: bool = False,
 ) -> genanki.Note:
     """Convert a generated card to a genanki note."""
 
@@ -116,10 +141,10 @@ def build_note(
         model=model,
         fields=[
             _render_front_text(card),
-            _render_back_text(card),
+            _render_back_text(card, minimal_cards=minimal_cards),
             audio_tags,
         ],
-        tags=card.tags,
+        tags=tags or [],
         guid=stable_note_guid(card),
     )
 
@@ -152,17 +177,18 @@ def capitalize_first_visible(value: str) -> str:
 
 
 def _render_front_text(card: GeneratedCard) -> str:
-    lines = [_core_block(capitalize_sentence(card.front_core_es))]
-    lines.extend(_plain_line(example.es) for example in card.examples)
+    lines = [_core_block(capitalize_sentence(card.origin_core))]
+    lines.extend(_plain_line(example.origin) for example in card.examples)
     return SECTION_BREAK.join(lines)
 
 
-def _render_back_text(card: GeneratedCard) -> str:
-    lines = [_core_block(capitalize_sentence(card.back_core_fr))]
-    lines.extend(_plain_line(example.fr) for example in card.examples)
-    notes = _render_notes(card)
-    if notes:
-        lines.append(notes)
+def _render_back_text(card: GeneratedCard, *, minimal_cards: bool = False) -> str:
+    lines = [_core_block(capitalize_sentence(card.target_core))]
+    lines.extend(_plain_line(example.target) for example in card.examples)
+    if not minimal_cards:
+        notes = _render_notes(card)
+        if notes:
+            lines.append(notes)
     return SECTION_BREAK.join(lines)
 
 
@@ -184,24 +210,36 @@ def _note_example_block(value: str) -> str:
 def _render_notes(card: GeneratedCard) -> str:
     note_sections = []
     if card.word_family:
-        note_sections.append(_render_note_section("Word family", card.word_family))
+        note_sections.append(
+            _render_note_section(NOTE_SECTION_LABELS["word_family"], card.word_family)
+        )
     if card.related_vocab:
-        note_sections.append(_render_note_section("Related vocab", card.related_vocab))
+        note_sections.append(
+            _render_note_section(
+                NOTE_SECTION_LABELS["related_vocab"], card.related_vocab
+            )
+        )
     if card.key_collocations:
         note_sections.append(
-            _render_note_section("Key collocations", card.key_collocations)
+            _render_note_section(
+                NOTE_SECTION_LABELS["key_collocations"], card.key_collocations
+            )
         )
     if card.register_notes:
         note_sections.append(
-            _render_note_section("Register and usage notes", card.register_notes)
+            _render_note_section(
+                NOTE_SECTION_LABELS["register_notes"], card.register_notes
+            )
         )
-    if card.usage_forms:
-        note_sections.append(_render_note_section("Usage forms", card.usage_forms))
     if card.note_examples:
         rendered_examples = LINE_BREAK.join(
             _note_example_block(example) for example in card.note_examples
         )
-        note_sections.append(_section_header("Examples") + LINE_BREAK + rendered_examples)
+        note_sections.append(
+            _section_header(NOTE_SECTION_LABELS["note_examples"])
+            + LINE_BREAK
+            + rendered_examples
+        )
 
     if not note_sections:
         return ""
@@ -232,7 +270,7 @@ def _render_note_item(
         return _underline_before_first_colon(item)
 
     details = _format_note_details(item)
-    visible_line = f"{item.fr}: {details}" if details else item.fr
+    visible_line = f"{item.target}: {details}" if details else item.target
     return _underline_before_first_colon(visible_line)
 
 
@@ -248,8 +286,8 @@ def _format_note_details(
     item: TranslationEntry | RelatedVocabEntry | KeyCollocationEntry,
 ) -> str:
     details = []
-    if item.en:
-        details.append(item.en)
+    if item.gloss:
+        details.append(item.gloss)
     if isinstance(item, RelatedVocabEntry) and item.nuance:
         details.append(f"({item.nuance})")
     if isinstance(item, (TranslationEntry, KeyCollocationEntry)) and item.note:
@@ -260,14 +298,14 @@ def _format_note_details(
 def write_apkg(
     cards: list[PackagedCard],
     output_path: Path,
-    deck_name: str,
-    model_name: str,
+    options: PackagingOptions,
 ) -> Path:
     """Write a fresh Anki package for generated cards."""
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    model = build_model(model_name)
-    deck = build_deck(deck_name)
+    model = build_model(options.model_name)
+    deck = build_deck(options.deck_name)
+    tags = build_card_tags(options.target_language, options.cefr_level)
     media_files = []
 
     for packaged_card in cards:
@@ -275,7 +313,15 @@ def write_apkg(
         for audio_path in packaged_card.audio_paths:
             audio_filenames.append(audio_path.name)
             media_files.append(str(audio_path))
-        deck.add_note(build_note(packaged_card.card, model, audio_filenames))
+        deck.add_note(
+            build_note(
+                packaged_card.card,
+                model,
+                audio_filenames,
+                tags=tags,
+                minimal_cards=options.minimal_cards,
+            )
+        )
 
     package = genanki.Package(deck)
     package.media_files = media_files

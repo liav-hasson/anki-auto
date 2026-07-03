@@ -7,14 +7,17 @@ import genanki
 
 from anki_auto.anki import (
     PackagedCard,
+    build_card_tags,
     build_model,
     build_note,
     capitalize_sentence,
+    slug,
     stable_audio_filename,
     stable_int_id,
     stable_note_guid,
     write_apkg,
 )
+from anki_auto.options import PackagingOptions
 from tests.factories import empty_note_section_kwargs, generated_card
 
 
@@ -25,14 +28,14 @@ def test_stable_ids_and_filenames_are_reproducible() -> None:
     expected_note_guid = genanki.guid_for(
         "front-text-back-text-v2",
         card.source,
-        card.front_core_es,
-        card.back_core_fr,
+        card.origin_core,
+        card.target_core,
     )
     legacy_note_guid = genanki.guid_for(
         "front-text-back-text-v1",
         card.source,
-        card.front_core_es,
-        card.back_core_fr,
+        card.origin_core,
+        card.target_core,
     )
 
     assert stable_int_id("deck") == stable_int_id("deck")
@@ -92,11 +95,49 @@ def test_build_note_escapes_fields_and_adds_audio() -> None:
     assert "<b>Related vocab</b>" in note.fields[1]
     assert "<b>Key collocations</b>" in note.fields[1]
     assert "<b>Register and usage notes</b>" in note.fields[1]
-    assert "<b>Usage forms</b>" in note.fields[1]
     assert "<b>Examples</b>" in note.fields[1]
     assert "Use &lt;le&gt;, not la." in note.fields[1]
     assert note.fields[2] == "[sound:sleep-1.mp3] [sound:sleep-2.mp3]"
-    assert note.tags == ["french", "verb"]
+    assert note.tags == []
+
+
+def test_build_card_tags_are_namespaced_and_slugged() -> None:
+    """Deterministic tags are namespaced and slugged from Settings values."""
+
+    assert build_card_tags("Brazilian Portuguese", "A2") == [
+        "lang::brazilian-portuguese",
+        "level::a2",
+    ]
+
+
+def test_slug_collapses_non_alphanumeric_runs() -> None:
+    """Slugs lowercase text and collapse runs of non-alphanumerics to hyphens."""
+
+    assert slug("  Brazilian   Portuguese!! ") == "brazilian-portuguese"
+    assert slug("A2") == "a2"
+
+
+def test_write_apkg_note_carries_namespaced_tags() -> None:
+    """Packaging applies the two deterministic tags to each note."""
+
+    deck = genanki.Deck(1, "Tag Test")
+    model = build_model("Test Model")
+    tags = build_card_tags("Brazilian Portuguese", "A2")
+    note = build_note(generated_card(), model, tags=tags)
+    deck.add_note(note)
+
+    assert note.tags == ["lang::brazilian-portuguese", "level::a2"]
+
+
+def test_minimal_cards_render_skips_notes_block() -> None:
+    """Minimal cards render only core and examples, dropping the notes block."""
+
+    note = build_note(generated_card(), build_model("Test Model"), minimal_cards=True)
+
+    assert "<b>--- NOTES ---</b>" not in note.fields[1]
+    assert "<b>Word family</b>" not in note.fields[1]
+    assert "<b>Dormir</b>" in note.fields[1]
+    assert "Je dors huit heures." in note.fields[1]
 
 
 def test_structured_note_french_terms_are_underlined() -> None:
@@ -107,16 +148,6 @@ def test_structured_note_french_terms_are_underlined() -> None:
     assert "<u>Un sommeil</u>: sleep" in note.fields[1]
     assert "<u>Se réveiller</u>: to wake up (opposite action)" in note.fields[1]
     assert "<u>Dormir bien</u>: to sleep well" in note.fields[1]
-
-
-def test_usage_forms_underline_french_terms() -> None:
-    """Usage forms should render with the French term underlined."""
-
-    note = build_note(generated_card(), build_model("Test Model"))
-
-    assert "<u>Je dors</u>: I sleep (present tense)" in note.fields[1]
-    assert "<u>Tu dors</u>: you sleep (present tense)" in note.fields[1]
-    assert "<u>Il dort</u>: he sleeps (present tense)" in note.fields[1]
 
 
 def test_register_note_with_colon_underlines_only_before_first_colon() -> None:
@@ -135,21 +166,20 @@ def test_rendered_lines_start_capitalized() -> None:
     """Renderer casing should cover each standalone line shown on the card."""
 
     card = generated_card(
-        front_core_es="dormir",
-        back_core_fr="dormir",
+        origin_core="dormir",
+        target_core="dormir",
         examples=[
-            {"fr": "je dors huit heures.", "es": "duermo ocho horas."},
-            {"fr": "elle dort mal ce soir.", "es": "ella duerme mal esta noche."},
+            {"target": "je dors huit heures.", "origin": "duermo ocho horas."},
+            {"target": "elle dort mal ce soir.", "origin": "ella duerme mal esta noche."},
         ],
-        word_family=[{"fr": "un sommeil", "en": "sleep", "note": None}],
+        word_family=[{"target": "un sommeil", "gloss": "sleep", "note": None}],
         related_vocab=[
-            {"fr": "se réveiller", "en": "to wake up", "nuance": "opposite action"}
+            {"target": "se réveiller", "gloss": "to wake up", "nuance": "opposite action"}
         ],
         key_collocations=[
-            {"fr": "dormir bien", "en": "to sleep well", "note": None}
+            {"target": "dormir bien", "gloss": "to sleep well", "note": None}
         ],
         register_notes=["common irregular present forms vary by subject."],
-        usage_forms=[{"fr": "je dors", "en": "I sleep", "note": None}],
         note_examples=["le bébé dort déjà."],
     )
 
@@ -229,8 +259,12 @@ def test_write_apkg_creates_file_without_audio(tmp_path: Path) -> None:
     write_apkg(
         cards=[PackagedCard(card=generated_card())],
         output_path=output_path,
-        deck_name="French Test",
-        model_name="French Basic Test",
+        options=PackagingOptions(
+            deck_name="French Test",
+            model_name="French Basic Test",
+            target_language="French",
+            cefr_level="A2",
+        ),
     )
 
     assert output_path.exists()
@@ -249,8 +283,12 @@ def test_write_apkg_creates_file_with_multiple_audio_files(tmp_path: Path) -> No
     write_apkg(
         cards=[PackagedCard(card=generated_card(), audio_paths=(audio_one, audio_two))],
         output_path=output_path,
-        deck_name="French Test",
-        model_name="French Basic Test",
+        options=PackagingOptions(
+            deck_name="French Test",
+            model_name="French Basic Test",
+            target_language="French",
+            cefr_level="A2",
+        ),
     )
 
     assert output_path.exists()

@@ -14,6 +14,7 @@ class OpenAIAudioGenerator:
 
     model: str = "gpt-4o-mini-tts"
     voice: str = "alloy"
+    api_key: str | None = None
     client: OpenAI | None = None
 
     def generate(self, text: str, output_path: Path) -> Path:
@@ -24,7 +25,7 @@ class OpenAIAudioGenerator:
             raise ValueError("audio text must not be blank")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        client = self.client or OpenAI()
+        client = self.client or OpenAI(api_key=self.api_key)
         response = client.audio.speech.create(
             model=self.model,
             voice=self.voice,

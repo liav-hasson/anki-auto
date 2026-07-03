@@ -1,87 +1,163 @@
-"""Prompt construction for French card generation."""
+"""Modular prompt construction for language-neutral card generation."""
 
 from __future__ import annotations
 
-from .models import card_json_schema
+from .config import PromptConfig
 
 
-SYSTEM_PROMPT = """You create fresh French Anki cards from loose input items.
+_LEVEL_TO_TIER: dict[str, int] = {
+    "A1": 1,
+    "A2": 1,
+    "B1": 2,
+    "B2": 2,
+    "C1": 3,
+    "C2": 3,
+}
 
-Return exactly one JSON object matching the provided schema.
-The learner is an A1-B1 French student who is fluent in Spanish and English.
-Distill messy input into the cleanest reusable French core concept; remove examples, "etc.",
-context clutter, and tentative lists from the core instead of copying a long prompt verbatim.
-
-Card content:
-- front_core_es is Spanish only: a direct translation of the core concept.
-- back_core_fr is the French core word, phrase, or construction.
-- examples contains 2-3 short French sentences and direct Spanish translations.
-- Keep French and Spanish examples natural, concise, varied, and beginner-safe.
-
-Optional note sections:
-- Use empty arrays for irrelevant sections. Do not add filler.
-- word_family: useful noun, adjective, verb, or adverb forms only.
-- related_vocab: usually 2-5 useful derived forms or nearby words for one lexical item,
-    including past participles, noun/adjective forms, opposites, or related nouns when useful.
-- key_collocations: fixed expressions or common pairings using the keyword.
-- register_notes: English-only prose notes about formality, region, false friends,
-    exceptions, pronunciation, orthography, or grammar traps. Do not include example sentences.
-- usage_forms: French forms, conjugations, adjective forms, or trap phrases that support the
-    register notes, each with a practical English translation.
-- note_examples: 1-3 original French-only sentences showing meanings, collocations, or registers
-    not already used in the main examples. Do not include them in register_notes.
-- Structured note entries in word_family, related_vocab, key_collocations, and usage_forms must be
-    expressible as French term: English translation + concise nuance.
-
-Core concept formatting:
-- Use infinitives for verbs; examples may conjugate naturally.
-- Include the reflexive pronoun when relevant, such as "se souvenir".
-- Do not include conjugated example variants in the core.
-- Include a gender article for nouns, such as "le sommeil", "la gare", or "l'eau".
-- Include masculine and feminine forms for adjectives, when exists.
-- Use slash only for compact neutral lemmas or paired forms, not context lists.
-- Write grammar constructions as compact templates.
-- Keep broad concepts broad, such as "numbers 10-100", "days of the week", or "Greetings".
-
-Note term formatting:
-- Normalize French terms in word_family, related_vocab, key_collocations, and usage_forms
-    like the core concept when applicable.
-- Use infinitive/reflexive forms for verbs, gender articles for nouns, masculine/feminine
-    paired forms for adjectives, and natural lemma forms for collocations.
-
-Example style:
-- Keep sentences short, natural, and useful for beginner/intermediate learners.
-- Vary vocabulary, sentence patterns, moods, times, locations, connectors, names, and contexts.
-- Avoid repeated vocabulary and default patterns such as always using "J'aime...".
-- Casual or slang wording is welcome when it is common and beginner-safe.
-- Keep notes compact: fragments and short lines are better than long paragraphs.
-"""
+_CEFR_TIERS: dict[int, str] = {
+    1: (
+        "Write one original sentence for each core meaning of the word "
+        "(typically 2, 3 if the word has versatile meanings).\n\n"
+        "- Keep sentences between 5–9 words.\n"
+        "- Match {level} vocabulary and grammar — natural, simple, beginner-level "
+        "vocabulary.\n"
+        "- Keep subjects, tenses, and moods basic across sentences so the cards are "
+        "simple, but flexible.\n"
+        "- Use a mix of simple prepositions, interjections, connectors when natural "
+        "within the sentence."
+    ),
+    2: (
+        "Write one original sentence for each core meaning of the word "
+        "(typically 2, 3 if the word has versatile meanings).\n\n"
+        "- Keep sentences between 6–12 words.\n"
+        "- Match {level} vocabulary and grammar — natural, idiomatic, avoid "
+        "beginner-level vocabulary.\n"
+        "- Vary subjects, tenses, and moods across sentences so the card shows the "
+        "word flexing grammatically.\n"
+        "- Use a mix of prepositions, interjections, connectors naturally within the "
+        "sentence."
+    ),
+    3: (
+        "Write one original sentence for each core meaning of the word "
+        "(typically 2, 3 if the word has versatile meanings).\n\n"
+        "- Keep sentences between 7–15 words.\n"
+        "- Match {level} vocabulary and grammar — natural, idiomatic, avoid "
+        "beginner-level vocabulary.\n"
+        "- Vary subjects, tenses, and moods across sentences so the card shows the "
+        "word flexing grammatically.\n"
+        "- Use a mix of advanced prepositions, interjections, connectors naturally "
+        "within the sentence."
+    ),
+}
 
 
-def build_card_messages(item: str) -> list[dict[str, str]]:
+def build_system_prompt(cfg: PromptConfig) -> str:
+    """Build the role-setting system piece."""
+
+    if cfg.origin_language.strip().casefold() == cfg.notes_language.strip().casefold():
+        native_clause = f"whose native language is {cfg.origin_language}."
+    else:
+        native_clause = (
+            "whose native languages are "
+            f"{cfg.origin_language} and {cfg.notes_language}."
+        )
+    return (
+        f"You create high-quality {cfg.target_language} Anki flashcards for a learner "
+        f"{native_clause}\n\n"
+        "Each card is built from one loose input item. Your task is to distill that "
+        f"input into the single cleanest, most reusable {cfg.target_language} concept, "
+        "then build a flashcard based on the rules explained ahead.\n\n"
+        "Return exactly one structured card object matching the provided schema."
+    )
+
+
+def build_cefr_prompt(cfg: PromptConfig) -> str:
+    """Build the CEFR difficulty piece for the tier of ``cfg.level``."""
+
+    tier = _LEVEL_TO_TIER[cfg.level]
+    return _CEFR_TIERS[tier].format(level=cfg.level)
+
+
+def build_core_concept_prompt(cfg: PromptConfig) -> str:
+    """Build the distillation and lemma-normalization piece."""
+
+    return (
+        "If needed, distill the input item into one clean, reusable "
+        f"{cfg.target_language} learning concept by removing context clutter, "
+        'examples, "etc.", and tentative lists. Capture the single reusable idea, not '
+        "a verbatim copy of a long input.\n\n"
+        f"Normalize the core concept to its natural {cfg.target_language} dictionary "
+        "form:\n"
+        "- Infinitive for verbs, singular for nouns, base form for adjectives.\n\n"
+        f"If {cfg.target_language} has these, also include:\n"
+        "- Gender article for nouns.\n"
+        "- Reflexive/pronominal marker for verbs.\n"
+        "- Masculine and feminine forms for adjectives.\n"
+        "- Formality register."
+    )
+
+
+def build_flashcard_prompt(cfg: PromptConfig) -> str:
+    """Build the card-structure piece (back-first, front translation)."""
+
+    return (
+        "Build the flashcard around the core concept and level of the user, in the "
+        "following structure:\n"
+        f"- Back: the normalized {cfg.target_language} core concept, and the example "
+        "sentences.\n"
+        "- Front: direct, natural translation of the core concept and example "
+        f"sentences in {cfg.origin_language}."
+    )
+
+
+def build_notes_prompt(cfg: PromptConfig) -> str:
+    """Build the optional learning-notes piece."""
+
+    return (
+        "Always add notes to a card, extending the learning value from each card. The "
+        f"notes are written in {cfg.notes_language}.\n\n"
+        f"Every gloss, nuance, and register note is written in {cfg.notes_language}; "
+        f"target terms and note examples stay in {cfg.target_language}.\n\n"
+        "The following notes sections are optional, select depending on the added "
+        "value for the card; leave the rest empty rather than padding with filler.\n\n"
+        "word_family: all related forms of the concept (noun, verb, adjective, "
+        "adverb), if exists. briefly on how common the usage is for each form.\n"
+        "related_vocab: nearby or derived words worth knowing, synonyms, antonyms, "
+        "each with a short meaning nuance, usage (region / commonality).\n"
+        "key_collocations: fixed expressions or common pairings that use the concept.\n"
+        "register_notes: when exists, include very brief notes on formality, regional usage, "
+        "false friends, readings, commonmistakes, or grammar traps.\n"
+        f"note_examples: 1–3 extra {cfg.target_language} sentences showing meanings or "
+        "uses not already covered by the main examples."
+    )
+
+
+def assemble_system_prompt(cfg: PromptConfig, *, minimal_cards: bool) -> str:
+    """Join the prompt pieces in fixed order, omitting notes when minimal."""
+
+    pieces = [
+        build_system_prompt(cfg),
+        build_core_concept_prompt(cfg),
+        build_cefr_prompt(cfg),
+        build_flashcard_prompt(cfg),
+    ]
+    if not minimal_cards:
+        pieces.append(build_notes_prompt(cfg))
+    return "\n\n".join(pieces)
+
+
+def build_card_messages(
+    item: str,
+    cfg: PromptConfig,
+    *,
+    minimal_cards: bool,
+) -> list[dict[str, str]]:
     """Build chat messages for one loose input item."""
 
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
         {
-            "role": "user",
-            "content": (
-                "Create one French Anki card from this loose input item. "
-                "Set source to the exact input text.\n\n"
-                f"Input item: {item.strip()}"
-            ),
+            "role": "system",
+            "content": assemble_system_prompt(cfg, minimal_cards=minimal_cards),
         },
+        {"role": "user", "content": f"Input item: {item.strip()}"},
     ]
-
-
-def build_response_format() -> dict[str, object]:
-    """Build a conservative structured-output response format for OpenAI chat completions."""
-
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "french_anki_card",
-            "strict": True,
-            "schema": card_json_schema(),
-        },
-    }
