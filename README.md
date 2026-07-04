@@ -93,7 +93,7 @@ No extra formatting / styling was done.
    anki-auto
    ```
 
-3. Drag the generated file to Anki deck, review the created cards - done.
+3. Import or drag the generated file to Anki deck, review the created cards - done.
 
 ## Variables
 

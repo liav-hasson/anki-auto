@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-07-04
+
+### Changed
+
+- Specified notes prompt to not repeat the same items in different sections.
+- B1-C2 Prompts - forced sentences prompt to change registers / tones in each sentence
+
 ## [0.2.0] - 2026-07-04
 
 ### Added
