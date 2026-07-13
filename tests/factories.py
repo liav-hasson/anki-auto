@@ -32,12 +32,6 @@ def card_kwargs(**overrides: Any) -> dict[str, Any]:
             {"target": "se réveiller", "gloss": "to wake up", "nuance": "opposite action"},
             {"target": "une chambre", "gloss": "a bedroom", "nuance": "place for sleep"},
         ],
-        "key_collocations": [
-            {"target": "dormir bien", "gloss": "to sleep well", "note": None},
-        ],
-        "register_notes": [
-            "common irregular present forms vary by subject."
-        ],
         "note_examples": ["Le bébé dort déjà.", "Elle a bien dormi."],
     }
     values.update(overrides)
@@ -56,7 +50,5 @@ def empty_note_section_kwargs() -> dict[str, list[Any]]:
     return {
         "word_family": [],
         "related_vocab": [],
-        "key_collocations": [],
-        "register_notes": [],
         "note_examples": [],
     }

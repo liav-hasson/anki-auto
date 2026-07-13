@@ -11,6 +11,7 @@ from openai import AuthenticationError
 
 from anki_auto.cli import (
     DEFAULT_NOTE_MODEL_NAME,
+    confirm_run,
     generate_cards,
     main,
     package_cards_with_audio,
@@ -52,9 +53,30 @@ def test_read_input_items_ignores_blank_lines_and_comments(tmp_path: Path) -> No
 
 
 def test_default_note_model_name_is_v2() -> None:
-    """Default imports should avoid reusing the original Anki model template."""
+    """Default imports should use the language-neutral v2 Anki model template."""
 
-    assert DEFAULT_NOTE_MODEL_NAME == "Anki Auto French Spanish Notes v2"
+    assert DEFAULT_NOTE_MODEL_NAME == "Anki Auto Notes v2"
+
+
+def test_confirm_run_prints_resolved_output_and_overwrite_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The preflight summary should show the actual output path and overwrite mode."""
+
+    _set_valid_env(monkeypatch)
+    monkeypatch.setenv("ANKI_ASSUME_YES", "true")
+    monkeypatch.setenv("ANKI_OUTPUT_PATH", str(tmp_path / "deck.apkg"))
+    monkeypatch.setenv("ANKI_OVERWRITE_OUTPUT", "false")
+    settings = Settings(_env_file=None)
+    resolved_output_path = tmp_path / "deck_1.apkg"
+
+    assert confirm_run(settings, 3, output_path=resolved_output_path) is True
+
+    captured = capsys.readouterr()
+    assert f"[INFO]   output path:     {resolved_output_path}" in captured.err
+    assert "[INFO]   overwrite output: off" in captured.err
 
 
 def test_package_cards_with_audio_generates_one_file_per_example(
@@ -416,11 +438,11 @@ def test_resolve_output_path_skips_taken_variants(tmp_path: Path) -> None:
 
 
 def _prepare_confirm_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Set up a minimal valid, dry-run environment for confirm-gate tests."""
+    """Set up a minimal valid environment for confirm-gate tests."""
 
     monkeypatch.chdir(tmp_path)
     _set_valid_env(monkeypatch)
-    monkeypatch.setenv("ANKI_DRY_RUN", "true")
+    monkeypatch.setenv("ANKI_GENERATE_AUDIO", "false")
     (tmp_path / "items.txt").write_text("dog\n", encoding="utf-8")
 
 

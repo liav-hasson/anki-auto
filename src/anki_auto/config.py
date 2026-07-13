@@ -58,7 +58,6 @@ class Settings(BaseSettings):
     output_path: Path = Path("deck.apkg")
 
     generate_audio: bool = True
-    dry_run: bool = False
     minimal_cards: bool = False
     assume_yes: bool = False
     overwrite_output: bool = False

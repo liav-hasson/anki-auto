@@ -10,7 +10,7 @@ from openai import OpenAI
 
 @dataclass(frozen=True)
 class OpenAIAudioGenerator:
-    """Generate MP3 audio for French card text."""
+    """Generate MP3 audio for target-language card text."""
 
     model: str = "gpt-4o-mini-tts"
     voice: str = "alloy"
@@ -26,10 +26,10 @@ class OpenAIAudioGenerator:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         client = self.client or OpenAI(api_key=self.api_key)
-        response = client.audio.speech.create(
+        with client.audio.speech.with_streaming_response.create(
             model=self.model,
             voice=self.voice,
             input=cleaned_text,
-        )
-        response.stream_to_file(output_path)
+        ) as response:
+            response.stream_to_file(output_path)
         return output_path

@@ -181,8 +181,6 @@ def test_generated_card_allows_empty_note_sections() -> None:
 
     assert card.word_family == []
     assert card.related_vocab == []
-    assert card.key_collocations == []
-    assert card.register_notes == []
     assert card.note_examples == []
 
 
@@ -190,11 +188,4 @@ def test_generated_card_rejects_blank_note_items() -> None:
     """Generated cards should reject blank content inside optional notes."""
 
     with pytest.raises(ValidationError):
-        GeneratedCard(**card_kwargs(register_notes=[" "]))
-
-    with pytest.raises(ValidationError):
-        GeneratedCard(
-            **card_kwargs(
-                key_collocations=[{"target": "avoir besoin de", "gloss": " ", "note": None}]
-            )
-        )
+        GeneratedCard(**card_kwargs(note_examples=[" "]))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 GLOSS_DESCRIPTION = "Notes-language translation."
@@ -83,38 +83,6 @@ class RelatedVocabEntry(BaseModel):
         return _clean_optional_text(value)
 
 
-class KeyCollocationEntry(BaseModel):
-    """A useful target-language collocation or fixed expression."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    target: str = Field(description="Target-language collocation or fixed expression.")
-    gloss: str | None = Field(default=None, description=GLOSS_DESCRIPTION)
-    note: str | None = Field(default=None, description="Short optional usage note.")
-
-    @field_validator("target")
-    @classmethod
-    def require_text(cls, value: str) -> str:
-        """Reject blank collocation text and trim surrounding whitespace."""
-
-        return _clean_text(value)
-
-    @field_validator("gloss", "note")
-    @classmethod
-    def normalize_optional_text(cls, value: str | None) -> str | None:
-        """Trim optional text and collapse blank values to None."""
-
-        return _clean_optional_text(value)
-
-    @model_validator(mode="after")
-    def require_translation_or_note(self) -> KeyCollocationEntry:
-        """Require each collocation to carry either a translation or usage note."""
-
-        if not self.gloss and not self.note:
-            raise ValueError("key collocation must include gloss or note")
-        return self
-
-
 def _clean_optional_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -153,18 +121,6 @@ class GeneratedCard(BaseModel):
             "Related target-language forms and nearby words with glosses and nuance."
         ),
     )
-    key_collocations: list[KeyCollocationEntry] = Field(
-        default_factory=list,
-        max_length=6,
-        description="Useful collocations or fixed expressions using the keyword.",
-    )
-    register_notes: list[str] = Field(
-        default_factory=list,
-        max_length=4,
-        description=(
-            "Short practical notes-language register or usage notes; no example sentences."
-        ),
-    )
     note_examples: list[str] = Field(
         default_factory=list,
         max_length=3,
@@ -178,17 +134,9 @@ class GeneratedCard(BaseModel):
 
         return _clean_text(value)
 
-    @field_validator("register_notes", "note_examples")
+    @field_validator("note_examples")
     @classmethod
     def require_text_items(cls, values: list[str]) -> list[str]:
         """Reject blank text items and trim surrounding whitespace."""
 
         return [_clean_text(value) for value in values]
-
-
-class CardBatch(BaseModel):
-    """Serializable collection of generated cards."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    cards: list[GeneratedCard]

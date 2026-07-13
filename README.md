@@ -13,11 +13,12 @@ Automating Anki flashcard creation. You type whatever you want to learn - and th
 
 ## Theory
 
-My idea for a high quality flashcard for language learning has to consist of these 3 main points:
+My idea for a high quality flashcard for language learning has to consist of these main points:
 
 - **Context**: learning not only the word itself, but how it connects and used naturally in real sentenes.
 - **Target language at the back**: forces you to generate the taget word and sentences on your own, making you actively produce and think in the target language.
 - **Extensive notes**: increasing the value of each card by adding related words, synonyms and antonyms, and more examples. for example in Spanish - why learn "Recordar" only, when you can add "Acordarse", "Recuerdo" and "Recordatorio".
+- **You make the card**: adding words in specific topics that interest you, of things you want to say or understand - you should direct your learning path, especially when becoming more advanced.
 
 However, I also believe every person is different and has their own preferences, and should adopt their own personal strategy and systems for language learning. A single "best strategy" doesn't exist and depends only yourself. Therefore, you are welcome to fork this repo and make any changes to the code to suit your personal objectives better.
 
@@ -112,7 +113,6 @@ No extra formatting / styling was done.
 | `ANKI_OUTPUT_PATH` | Path of the generated `.apkg`. | No | `deck.apkg` | Any file path |
 | `ANKI_CONCURRENCY` | Number of parallel OpenAI requests. Higher is faster but hits rate limits sooner. | No | `5` | Integer `>= 1` |
 | `ANKI_GENERATE_AUDIO` | Generate audio for each main example sentence. | No | `true` | boolean* |
-| `ANKI_DRY_RUN` | Print card JSON and skip building the `.apkg`. | No | `false` | boolean* |
 | `ANKI_MINIMAL_CARDS` | Sentences only (core + examples, no notes). | No | `false` | boolean* |
 | `ANKI_ASSUME_YES` | Skip the confirmation prompt (for automation / non-interactive use). | No | `false` | boolean* |
 | `ANKI_OVERWRITE_OUTPUT` | Overwrite an existing output file instead of writing `<name>_1.apkg`. | No | `false` | boolean* |

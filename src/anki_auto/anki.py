@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import html
-import re
+import os
+import tempfile
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +15,6 @@ import genanki
 
 from .models import (
     GeneratedCard,
-    KeyCollocationEntry,
     RelatedVocabEntry,
     TranslationEntry,
 )
@@ -24,12 +25,17 @@ FIELD_NAMES = ["FrontText", "BackText", "BackAudio"]
 NOTE_EXAMPLE_STYLE = "color: #39ff14; font-style: italic;"
 SECTION_BREAK = "<br><br>"
 LINE_BREAK = "<br>"
+CARD_CSS = """
+.card {
+    font-family: Arial;
+    font-size: 20px;
+    text-align: center;
+}
+""".strip()
 
 NOTE_SECTION_LABELS = {
     "word_family": "Word family",
     "related_vocab": "Related vocab",
-    "key_collocations": "Key collocations",
-    "register_notes": "Register and usage notes",
     "note_examples": "Examples",
 }
 
@@ -43,9 +49,26 @@ class PackagedCard:
 
 
 def slug(value: str) -> str:
-    """Lowercase text with runs of non-alphanumerics collapsed to single hyphens."""
+    """Build a Unicode-aware slug with a hash fallback for symbol-only text."""
 
-    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    normalized = unicodedata.normalize("NFKC", value.strip()).casefold()
+    parts: list[str] = []
+    previous_was_separator = False
+
+    for character in normalized:
+        if character.isalnum():
+            parts.append(character)
+            previous_was_separator = False
+        elif parts and not previous_was_separator:
+            parts.append("-")
+            previous_was_separator = True
+
+    slug_value = "".join(parts).strip("-")
+    if slug_value:
+        return slug_value
+
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"tag-{digest}"
 
 
 def build_card_tags(target_language: str, cefr_level: str) -> list[str]:
@@ -59,7 +82,7 @@ def stable_int_id(value: str) -> int:
     """Create a stable positive Anki id from text."""
 
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()
-    return int(digest[:8], 16)
+    return int(digest[:15], 16)
 
 
 def stable_note_guid(card: GeneratedCard) -> str:
@@ -89,7 +112,7 @@ def stable_audio_filename(
             [card.source, card.target_core, str(example_index), example.target]
         ).encode("utf-8")
     ).hexdigest()[:16]
-    source_slug = re.sub(r"[^a-z0-9]+", "-", card.source.lower()).strip("-")[:40]
+    source_slug = slug(card.source)[:40]
     prefix = source_slug or "card"
     return f"anki-auto-{prefix}-{example_index}-{digest}{extension}"
 
@@ -115,6 +138,7 @@ def build_model(model_name: str) -> genanki.Model:
 """.strip(),
             }
         ],
+        css=CARD_CSS,
     )
 
 
@@ -170,12 +194,6 @@ def capitalize_sentence(value: str) -> str:
     return "".join(characters)
 
 
-def capitalize_first_visible(value: str) -> str:
-    """Backward-compatible alias for older callers."""
-
-    return capitalize_sentence(value)
-
-
 def _render_front_text(card: GeneratedCard) -> str:
     lines = [_core_block(capitalize_sentence(card.origin_core))]
     lines.extend(_plain_line(example.origin) for example in card.examples)
@@ -219,18 +237,6 @@ def _render_notes(card: GeneratedCard) -> str:
                 NOTE_SECTION_LABELS["related_vocab"], card.related_vocab
             )
         )
-    if card.key_collocations:
-        note_sections.append(
-            _render_note_section(
-                NOTE_SECTION_LABELS["key_collocations"], card.key_collocations
-            )
-        )
-    if card.register_notes:
-        note_sections.append(
-            _render_note_section(
-                NOTE_SECTION_LABELS["register_notes"], card.register_notes
-            )
-        )
     if card.note_examples:
         rendered_examples = LINE_BREAK.join(
             _note_example_block(example) for example in card.note_examples
@@ -253,7 +259,7 @@ def _render_notes(card: GeneratedCard) -> str:
 
 def _render_note_section(
     title: str,
-    items: Sequence[TranslationEntry | RelatedVocabEntry | KeyCollocationEntry | str],
+    items: Sequence[TranslationEntry | RelatedVocabEntry | str],
 ) -> str:
     rendered_items = LINE_BREAK.join(_render_note_item(item) for item in items)
     return _section_header(title) + LINE_BREAK + rendered_items
@@ -264,7 +270,7 @@ def _section_header(title: str) -> str:
 
 
 def _render_note_item(
-    item: TranslationEntry | RelatedVocabEntry | KeyCollocationEntry | str,
+    item: TranslationEntry | RelatedVocabEntry | str,
 ) -> str:
     if isinstance(item, str):
         return _underline_before_first_colon(item)
@@ -283,14 +289,14 @@ def _underline_before_first_colon(value: str) -> str:
 
 
 def _format_note_details(
-    item: TranslationEntry | RelatedVocabEntry | KeyCollocationEntry,
+    item: TranslationEntry | RelatedVocabEntry,
 ) -> str:
     details = []
     if item.gloss:
         details.append(item.gloss)
     if isinstance(item, RelatedVocabEntry) and item.nuance:
         details.append(f"({item.nuance})")
-    if isinstance(item, (TranslationEntry, KeyCollocationEntry)) and item.note:
+    if isinstance(item, TranslationEntry) and item.note:
         details.append(f"({item.note})")
     return " ".join(details)
 
@@ -325,5 +331,21 @@ def write_apkg(
 
     package = genanki.Package(deck)
     package.media_files = media_files
-    package.write_to_file(str(output_path))
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+
+        package.write_to_file(str(temporary_path))
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+    except Exception:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
     return output_path

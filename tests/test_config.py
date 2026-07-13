@@ -174,7 +174,7 @@ def test_load_settings_warns_for_defaulted_operational_var(
     captured = capsys.readouterr()
     assert "ANKI_TEXT_MODEL not set, using default 'gpt-4.1-mini'" in captured.err
     assert "ANKI_GENERATE_AUDIO" not in captured.err
-    assert "ANKI_DRY_RUN" not in captured.err
+    assert "ANKI_MINIMAL_CARDS" not in captured.err
     assert settings.text_model == "gpt-4.1-mini"
 
 

@@ -1,5 +1,5 @@
-"""Generate French Anki decks from loose input items."""
+"""Generate Anki decks from loose input items."""
 
 __all__ = ["__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"

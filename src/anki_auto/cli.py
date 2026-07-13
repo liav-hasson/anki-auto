@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from openai import (
     AuthenticationError,
@@ -20,93 +23,111 @@ from . import logging_utils
 from .anki import PackagedCard, stable_audio_filename, write_apkg
 from .audio import OpenAIAudioGenerator
 from .config import Settings, load_settings
-from .models import CardBatch, GeneratedCard
+from .models import GeneratedCard
 from .openai_cards import OpenAICardGenerator
 from .options import AudioOptions, PackagingOptions
 
 
-DEFAULT_NOTE_MODEL_NAME = "Anki Auto French Spanish Notes v2"
+DEFAULT_NOTE_MODEL_NAME = "Anki Auto Notes v2"
 
 
 class ConfirmationUnavailableError(Exception):
     """Raised when confirmation is required but stdin is not interactive."""
 
 
+@dataclass(frozen=True)
+class RunResult:
+    """Summary of a completed CLI run."""
+
+    card_count: int = 0
+    output_path: Path | None = None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the settings-driven entrypoint and return a process exit code."""
-    # pylint: disable=too-many-return-statements  # one clause per failure mode
 
     del argv  # kept for API stability; the entrypoint takes no arguments
+    exit_code = 0
 
     try:
         settings = load_settings()
-        items = read_input_items(settings.input_path)
-
-        if not confirm_run(settings, len(items)):
-            logging_utils.warning("Aborted by user.")
-            return 0
-
-        client = OpenAI(api_key=settings.openai_api_key)
-        cards = generate_cards(items, settings, client=client)
-
-        if settings.dry_run:
-            print(CardBatch(cards=cards).model_dump_json(indent=2))
-            return 0
-
-        output_path = resolve_output_path(
-            settings.output_path, overwrite=settings.overwrite_output
-        )
-        with tempfile.TemporaryDirectory(prefix="anki-auto-media-") as media_dir:
-            packaged_cards = package_cards_with_audio(
-                cards=cards,
-                generate_audio=settings.generate_audio,
-                audio=AudioOptions(
-                    model=settings.audio_model,
-                    voice=settings.audio_voice,
-                    api_key=settings.openai_api_key,
-                    client=client,
-                ),
-                media_dir=Path(media_dir),
-                concurrency=settings.concurrency,
-            )
-            write_apkg(
-                cards=packaged_cards,
-                output_path=output_path,
-                options=PackagingOptions(
-                    deck_name=settings.deck_name,
-                    model_name=DEFAULT_NOTE_MODEL_NAME,
-                    target_language=settings.target_language,
-                    cefr_level=settings.cefr_level,
-                    minimal_cards=settings.minimal_cards,
-                ),
-            )
+        result = _run(settings)
     except ConfirmationUnavailableError:
-        return 1
+        exit_code = 1
     except KeyboardInterrupt:
         logging_utils.warning("Cancelled.")
-        return 130
+        exit_code = 130
     except ValidationError as error:
         for detail in error.errors():
             logging_utils.error(_format_validation_error(detail))
-        return 1
+        exit_code = 1
     except FileNotFoundError as error:
         logging_utils.error(
             f"input file '{error.filename}' not found. "
             "Create it or set ANKI_INPUT_PATH."
         )
-        return 1
+        exit_code = 1
     except OpenAIError as error:
         logging_utils.error(_format_openai_error(error))
-        return 1
+        exit_code = 1
     except (OSError, ValueError) as error:
         logging_utils.error(str(error))
-        return 1
+        exit_code = 1
+    else:
+        if result.output_path is not None:
+            logging_utils.info(f"Wrote {result.card_count} cards to {result.output_path}")
 
-    logging_utils.info(f"Wrote {len(cards)} cards to {output_path}")
-    return 0
+    return exit_code
 
 
-def confirm_run(settings: Settings, item_count: int) -> bool:
+def _run(settings: Settings) -> RunResult:
+    """Execute the happy-path workflow after settings have loaded."""
+
+    items = read_input_items(settings.input_path)
+    output_path = resolve_output_path(
+        settings.output_path, overwrite=settings.overwrite_output
+    )
+
+    if not confirm_run(settings, len(items), output_path=output_path):
+        logging_utils.warning("Aborted by user.")
+        return RunResult()
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    cards = generate_cards(items, settings, client=client)
+
+    with tempfile.TemporaryDirectory(prefix="anki-auto-media-") as media_dir:
+        packaged_cards = package_cards_with_audio(
+            cards=cards,
+            generate_audio=settings.generate_audio,
+            audio=AudioOptions(
+                model=settings.audio_model,
+                voice=settings.audio_voice,
+                api_key=settings.openai_api_key,
+                client=client,
+            ),
+            media_dir=Path(media_dir),
+            concurrency=settings.concurrency,
+        )
+        write_apkg(
+            cards=packaged_cards,
+            output_path=output_path,
+            options=PackagingOptions(
+                deck_name=settings.deck_name,
+                model_name=DEFAULT_NOTE_MODEL_NAME,
+                target_language=settings.target_language,
+                cefr_level=settings.cefr_level,
+                minimal_cards=settings.minimal_cards,
+            ),
+        )
+    return RunResult(card_count=len(cards), output_path=output_path)
+
+
+def confirm_run(
+    settings: Settings,
+    item_count: int,
+    *,
+    output_path: Path | None = None,
+) -> bool:
     """Show the resolved run summary and gate paid generation on confirmation.
 
     Returns ``True`` when generation should proceed and ``False`` when the user
@@ -114,7 +135,7 @@ def confirm_run(settings: Settings, item_count: int) -> bool:
     confirmation is required but no interactive terminal is available.
     """
 
-    _print_run_summary(settings, item_count)
+    _print_run_summary(settings, item_count, output_path=output_path)
 
     if settings.assume_yes:
         logging_utils.info("Proceeding without confirmation (ANKI_ASSUME_YES).")
@@ -131,9 +152,15 @@ def confirm_run(settings: Settings, item_count: int) -> bool:
     return response in {"y", "yes"}
 
 
-def _print_run_summary(settings: Settings, item_count: int) -> None:
+def _print_run_summary(
+    settings: Settings,
+    item_count: int,
+    *,
+    output_path: Path | None = None,
+) -> None:
     """Print the resolved run configuration before paid generation begins."""
 
+    resolved_output_path = output_path if output_path is not None else settings.output_path
     if settings.generate_audio:
         audio_line = (
             f"audio model:     {settings.audio_model} (voice: {settings.audio_voice})"
@@ -150,7 +177,8 @@ def _print_run_summary(settings: Settings, item_count: int) -> None:
         f"  {audio_line}",
         f"  deck name:       {settings.deck_name}",
         f"  input path:      {settings.input_path}",
-        f"  output path:     {settings.output_path}",
+        f"  output path:     {resolved_output_path}",
+        f"  overwrite output:{' on' if settings.overwrite_output else ' off'}",
         f"  minimal cards:   {'on' if settings.minimal_cards else 'off'}",
         f"  items:           {item_count}",
     ):
@@ -176,9 +204,7 @@ def resolve_output_path(path: Path, *, overwrite: bool) -> Path:
             return candidate
         index += 1
 
-
-
-def _format_validation_error(detail: dict) -> str:
+def _format_validation_error(detail: Mapping[str, Any]) -> str:
     """Render one pydantic error, echoing the offending value when meaningful."""
 
     location = ".".join(str(part) for part in detail["loc"])

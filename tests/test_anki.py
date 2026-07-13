@@ -1,11 +1,15 @@
 """Tests for local Anki package construction helpers."""
 
+import json
 import re
+import zipfile
 from pathlib import Path
 
 import genanki
+import pytest
 
 from anki_auto.anki import (
+    CARD_CSS,
     PackagedCard,
     build_card_tags,
     build_model,
@@ -39,6 +43,7 @@ def test_stable_ids_and_filenames_are_reproducible() -> None:
     )
 
     assert stable_int_id("deck") == stable_int_id("deck")
+    assert stable_int_id("deck") < 2**63
     assert stable_note_guid(card) == stable_note_guid(card)
     assert stable_note_guid(card) == expected_note_guid
     assert stable_note_guid(card) != legacy_note_guid
@@ -48,8 +53,8 @@ def test_stable_ids_and_filenames_are_reproducible() -> None:
     assert stable_audio_filename(card, 1).endswith(".mp3")
 
 
-def test_build_model_uses_three_expected_fields_without_custom_css() -> None:
-    """The note model should match the user's existing Spanish card workflow."""
+def test_build_model_uses_expected_fields_and_card_css() -> None:
+    """The note model should match the expected card fields and styling."""
 
     model = build_model("Test Model")
 
@@ -58,7 +63,7 @@ def test_build_model_uses_three_expected_fields_without_custom_css() -> None:
         "BackText",
         "BackAudio",
     ]
-    assert model.css == ""
+    assert model.css == CARD_CSS
     assert "{{FrontText}}" in model.templates[0]["qfmt"]
     assert "{{BackText}}" in model.templates[0]["afmt"]
     assert "{{BackAudio}}" in model.templates[0]["afmt"]
@@ -76,7 +81,11 @@ def test_capitalize_sentence_handles_core_text() -> None:
 def test_build_note_escapes_fields_and_adds_audio() -> None:
     """Note fields should be escaped and include the Anki sound tag."""
 
-    card = generated_card(register_notes=["Use <le>, not la."])
+    card = generated_card(
+        word_family=[
+            {"target": "un sommeil", "gloss": "sleep", "note": "Use <le>, not la."}
+        ]
+    )
     note = build_note(card, build_model("Test Model"), ["sleep-1.mp3", "sleep-2.mp3"])
 
     assert len(note.fields) == 3
@@ -93,8 +102,6 @@ def test_build_note_escapes_fields_and_adds_audio() -> None:
     assert "<br><br><b>--- NOTES ---</b><br><br>" not in note.fields[1]
     assert "<b>Word family</b>" in note.fields[1]
     assert "<b>Related vocab</b>" in note.fields[1]
-    assert "<b>Key collocations</b>" in note.fields[1]
-    assert "<b>Register and usage notes</b>" in note.fields[1]
     assert "<b>Examples</b>" in note.fields[1]
     assert "Use &lt;le&gt;, not la." in note.fields[1]
     assert note.fields[2] == "[sound:sleep-1.mp3] [sound:sleep-2.mp3]"
@@ -108,13 +115,16 @@ def test_build_card_tags_are_namespaced_and_slugged() -> None:
         "lang::brazilian-portuguese",
         "level::a2",
     ]
+    assert build_card_tags("עברית", "A2") == ["lang::עברית", "level::a2"]
 
 
 def test_slug_collapses_non_alphanumeric_runs() -> None:
     """Slugs lowercase text and collapse runs of non-alphanumerics to hyphens."""
 
     assert slug("  Brazilian   Portuguese!! ") == "brazilian-portuguese"
+    assert slug("Français") == "français"
     assert slug("A2") == "a2"
+    assert slug("!!!").startswith("tag-")
 
 
 def test_write_apkg_note_carries_namespaced_tags() -> None:
@@ -147,14 +157,15 @@ def test_structured_note_french_terms_are_underlined() -> None:
 
     assert "<u>Un sommeil</u>: sleep" in note.fields[1]
     assert "<u>Se réveiller</u>: to wake up (opposite action)" in note.fields[1]
-    assert "<u>Dormir bien</u>: to sleep well" in note.fields[1]
 
 
-def test_register_note_with_colon_underlines_only_before_first_colon() -> None:
+def test_note_with_colon_underlines_only_before_first_colon() -> None:
     """Colon-based note rendering should only underline the leading term."""
 
     note = build_note(
-        generated_card(register_notes=["heure: clock time: not duration."]),
+        generated_card(
+            word_family=[{"target": "heure", "gloss": "clock time: not duration."}]
+        ),
         build_model("Test Model"),
     )
 
@@ -176,10 +187,6 @@ def test_rendered_lines_start_capitalized() -> None:
         related_vocab=[
             {"target": "se réveiller", "gloss": "to wake up", "nuance": "opposite action"}
         ],
-        key_collocations=[
-            {"target": "dormir bien", "gloss": "to sleep well", "note": None}
-        ],
-        register_notes=["common irregular present forms vary by subject."],
         note_examples=["le bébé dort déjà."],
     )
 
@@ -229,13 +236,14 @@ def test_rendered_text_uses_explicit_html_breaks() -> None:
     assert '<div class="anki-auto-core">' not in note.fields[1]
 
 
-def test_model_does_not_claim_font_styling() -> None:
-    """Custom font CSS should not be emitted because Anki may ignore it."""
+def test_model_uses_requested_card_styling() -> None:
+    """Generated cards should use the requested default Anki styling."""
 
     model = build_model("Test Model")
 
-    assert "font-family" not in model.css
-    assert "Arial" not in model.css
+    assert "font-family: Arial;" in model.css
+    assert "font-size: 20px;" in model.css
+    assert "text-align: center;" in model.css
 
 
 def test_empty_note_sections_are_omitted() -> None:
@@ -269,6 +277,9 @@ def test_write_apkg_creates_file_without_audio(tmp_path: Path) -> None:
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+    with zipfile.ZipFile(output_path) as archive:
+        assert "collection.anki2" in archive.namelist()
+        assert json.loads(archive.read("media")) == {}
 
 
 def test_write_apkg_creates_file_with_multiple_audio_files(tmp_path: Path) -> None:
@@ -293,3 +304,39 @@ def test_write_apkg_creates_file_with_multiple_audio_files(tmp_path: Path) -> No
 
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+    with zipfile.ZipFile(output_path) as archive:
+        media = json.loads(archive.read("media"))
+        assert set(media.values()) == {"dog-1.mp3", "dog-2.mp3"}
+        assert set(media) <= set(archive.namelist())
+
+
+def test_write_apkg_keeps_existing_output_when_package_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed package write should not corrupt an existing destination."""
+
+    output_path = tmp_path / "deck.apkg"
+    output_path.write_bytes(b"original package")
+
+    def _fail_write(_package: genanki.Package, path: str) -> None:
+        Path(path).write_bytes(b"partial package")
+        raise RuntimeError("package failed")
+
+    monkeypatch.setattr(genanki.Package, "write_to_file", _fail_write)
+
+    with pytest.raises(RuntimeError, match="package failed"):
+        write_apkg(
+            cards=[PackagedCard(card=generated_card())],
+            output_path=output_path,
+            options=PackagingOptions(
+                deck_name="French Test",
+                model_name="French Basic Test",
+                target_language="French",
+                cefr_level="A2",
+            ),
+        )
+
+    assert output_path.read_bytes() == b"original package"
+    leftovers = [path for path in tmp_path.iterdir() if path.name.startswith(".deck.apkg")]
+    assert leftovers == []

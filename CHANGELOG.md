@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.0] - 2026-07-13
+
+### Added
+
+- Preflight output now shows the actual `.apkg` file that will be written, including any
+  auto-added suffix when overwrite mode is off.
+- Preflight output now shows whether output overwrite mode is enabled.
+- Language tags now support non-Latin language names instead of collapsing to empty tags.
+
+### Changed
+
+- The default Anki note type is now language-neutral (`Anki Auto Notes v2`) instead of
+  French/Spanish-specific.
+- Audio generation now uses the supported OpenAI text-to-speech response flow, making the
+  audio path more future-proof with current OpenAI SDK versions.
+- Runtime dependency ranges are pinned to tested major versions for more predictable installs.
+- Generated Anki cards now use centered Arial text at 20px by default.
+- A1-A2 sentence prompts now ask for simple negation, question forms, and connectors when natural.
+- B1-C2 sentence prompts now emphasize natural, idiomatic target-language phrasing.
+- Package/version metadata now uses one source of truth and matches the current project version.
+- Internal CLI flow was simplified so the main command remains easier to maintain as the workflow grows.
+
+### Fixed
+
+- `.apkg` files are now written atomically, so a failed package write will not replace an
+  existing deck file with a partial or corrupt file.
+- Generated `.apkg` packages now have stronger test coverage for archive contents and media files.
+- Stable Anki deck/model IDs now use a larger ID space to reduce collision risk.
+- Stale French-only source wording was updated to match the language-neutral behavior.
+
+### Removed
+
+- Removed key collocations and register/usage notes from generated card output to keep notes focused.
+- Removed the misleading dry-run mode, because it still called the AI and only skipped package creation.
+- Removed an unused backwards-compatible rendering helper that had no in-project callers.
+
 ## [0.2.1] - 2026-07-04
 
 ### Changed

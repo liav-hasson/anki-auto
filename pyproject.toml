@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anki-auto"
-version = "0.1.0"
+dynamic = ["version"]
 requires-python = ">=3.10"
 dependencies = [
-	"genanki",
-	"openai>=1.40",
-	"pydantic",
-	"pydantic-settings",
+	"genanki>=0.13,<1",
+	"openai>=2.44,<3",
+	"pydantic>=2.13,<3",
+	"pydantic-settings>=2.14,<3",
 ]
 
 [project.optional-dependencies]
@@ -25,3 +25,6 @@ anki-auto = "anki_auto.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "anki_auto.__version__"}
