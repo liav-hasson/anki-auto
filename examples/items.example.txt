@@ -1,0 +1,13 @@
+# Core items and optional vocabulary to create flashcards from
+# Each line counts as 1 seperate flashcard, `#` prefixed lines are ignored.
+
+# === Spanish ===
+desde luego (ir derecho a, dar la cara, al cabo que ni quería, ¿a qué viene…?, de tanto en tanto)
+caer de bruces (estar por el piso, talones, descalzo, dar un respingo, rebotar)
+con las manos en la masa (dar la cara, desde luego, meter la mano, manosear, restregar)
+# dar un respingo (chillido, retumbar, resonar, estrépito, carraspear)
+# tiro al arco (delantero, tablero, garra, propinar, chasquido)
+# alto el fuego (embarque, desistir, convocar, un tercio, escolta)
+# chillido (chillón/chillona, retumbar, resonar, estrépito, bramar)
+# palpitar (resonar, destellar, tintineo, castañear, chasquido)
+# manosear (codos, nudillos, articulaciones, restregar, alisar)

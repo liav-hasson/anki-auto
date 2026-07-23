@@ -35,14 +35,13 @@ class OpenAICardGenerator:
         if card.source != cleaned_item:
             updates["source"] = cleaned_item
         if not self.prompt_config.customization:
-            updates["custom_note_sections"] = []
+            updates["custom_sections"] = []
         if self.minimal_cards:
             updates.update(
                 {
                     "word_family": [],
                     "related_vocab": [],
-                    "note_examples": [],
-                    "custom_note_sections": [],
+                    "custom_sections": [],
                 }
             )
         if updates:

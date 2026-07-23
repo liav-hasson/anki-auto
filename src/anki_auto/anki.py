@@ -15,8 +15,7 @@ import genanki
 
 from .models import (
     GeneratedCard,
-    RelatedVocabEntry,
-    TranslationEntry,
+    NoteItem,
 )
 from .options import PackagingOptions
 
@@ -36,7 +35,6 @@ CARD_CSS = """
 NOTE_SECTION_LABELS = {
     "word_family": "Word family",
     "related_vocab": "Related vocab",
-    "note_examples": "Examples",
 }
 
 
@@ -226,48 +224,31 @@ def _note_example_block(value: str) -> str:
 
 
 def _render_notes(card: GeneratedCard) -> str:
-    built_in_sections: list[str] = []
+    sections: list[str] = []
     if card.word_family:
-        built_in_sections.append(
+        sections.append(
             _render_note_section(NOTE_SECTION_LABELS["word_family"], card.word_family)
         )
     if card.related_vocab:
-        built_in_sections.append(
+        sections.append(
             _render_note_section(
                 NOTE_SECTION_LABELS["related_vocab"], card.related_vocab
             )
         )
-    if card.note_examples:
-        rendered_examples = LINE_BREAK.join(
-            _note_example_block(example) for example in card.note_examples
-        )
-        built_in_sections.append(
-            _section_header(NOTE_SECTION_LABELS["note_examples"])
-            + LINE_BREAK
-            + rendered_examples
-        )
+    for section in card.custom_sections:
+        sections.append(_render_note_section(section.title, section.items))
 
-    custom_sections: list[str] = []
-    if card.custom_note_sections:
-        for section in card.custom_note_sections:
-            custom_sections.append(_render_note_section(section.title, section.items))
-
-    note_sections = built_in_sections + custom_sections
-
-    if not note_sections:
+    if not sections:
         return ""
 
-    first_section, *remaining_sections = note_sections
+    first_section, *remaining_sections = sections
     rendered_notes = "<b>--- NOTES ---</b>" + LINE_BREAK + first_section
     if remaining_sections:
         rendered_notes += SECTION_BREAK + SECTION_BREAK.join(remaining_sections)
     return rendered_notes
 
 
-def _render_note_section(
-    title: str,
-    items: Sequence[TranslationEntry | RelatedVocabEntry | str],
-) -> str:
+def _render_note_section(title: str, items: Sequence[NoteItem]) -> str:
     rendered_items = LINE_BREAK.join(_render_note_item(item) for item in items)
     return _section_header(title) + LINE_BREAK + rendered_items
 
@@ -276,36 +257,12 @@ def _section_header(title: str) -> str:
     return f"<b>{_escape(title)}</b>"
 
 
-def _render_note_item(
-    item: TranslationEntry | RelatedVocabEntry | str,
-) -> str:
-    if isinstance(item, str):
-        return _underline_before_first_colon(item)
-
-    details = _format_note_details(item)
-    visible_line = f"{item.target}: {details}" if details else item.target
-    return _underline_before_first_colon(visible_line)
-
-
-def _underline_before_first_colon(value: str) -> str:
-    visible_line = capitalize_sentence(value)
-    term, separator, details = visible_line.partition(":")
-    if not separator:
-        return _escape(visible_line)
-    return f"<u>{_escape(term)}</u>{separator}{_escape(details)}"
-
-
-def _format_note_details(
-    item: TranslationEntry | RelatedVocabEntry,
-) -> str:
-    details = []
-    if item.gloss:
-        details.append(item.gloss)
-    if isinstance(item, RelatedVocabEntry) and item.nuance:
-        details.append(f"({item.nuance})")
-    if isinstance(item, TranslationEntry) and item.note:
-        details.append(f"({item.note})")
-    return " ".join(details)
+def _render_note_item(item: NoteItem) -> str:
+    term = f"<u>{_escape(capitalize_sentence(item.term))}</u>"
+    detail = f"{term}: {_escape(item.translation)}"
+    if item.nuance:
+        detail += f" (<i>{_escape(item.nuance)}</i>)"
+    return detail + LINE_BREAK + _note_example_block(item.example)
 
 
 def write_apkg(

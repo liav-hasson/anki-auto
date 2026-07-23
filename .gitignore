@@ -1,8 +1,6 @@
 # Anki artifacts
 *.apkg
 items.txt
-
-# User-owned prompt files (copy from examples/)
 customization.txt
 blacklist.txt
 

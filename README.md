@@ -86,15 +86,15 @@ cp examples/customization.example.txt customization.txt
 cp examples/blacklist.example.txt blacklist.txt
 ```
 
-`customization.txt` accepts any extra instructions per line. Blank lines and
-lines beginning with `#` are ignored. Instructions can request pronunciation, guide how
-extra input words are used, shorten notes, or request additional sections. They may
-override built-in content preferences, but cannot override language placement, structured
-output, the current item's explicit request, blacklist rules, or minimal-card mode.
+`customization.txt` accepts any extra instructions, one per active line (blank and `#`
+lines are ignored). Instructions take precedence over the built-in defaults — they can add
+or remove note sections, change the sentence style or note count, note the optional vocab,
+request pronunciation, and so on. They cannot override the language placement, the response
+schema, or minimal-card mode (which ignores customization entirely).
 
 `blacklist.txt` accepts one word or phrase per line using the same comment
-syntax. The model is asked to avoid those entries as supporting vocabulary in main and note
-examples. The requested learning concept is exempt when it overlaps an entry.
+syntax. The model is asked to avoid those entries as supporting vocabulary in the sentences
+and notes, on a best-effort basis.
 
 Both files are optional UTF-8 text files with an 8 KiB limit. Missing files and files with
 no active lines produce a warning before confirmation and are not included in the prompt.
@@ -106,11 +106,11 @@ run. The blacklist still applies to the example sentences.
 
 ### Add your input and run
 
-1. Create the file named by `ANKI_INPUT_PATH` (default `items.txt`) with one loose input item per line:
+1. Create the file named by `ANKI_INPUT_PATH` (default `items.txt`) with one item per line. The first word or chunk is the **core concept**; any words after it (e.g. in parentheses) are **optional vocab**, woven into the sentences only when they read naturally:
 
     ```text
     dog
-    to remember (use the word "bartender" in a sentence)
+    surf (surfboard, wave, competition)
     # lines are ignored with this prefix
     at the train station
     I would like a coffee

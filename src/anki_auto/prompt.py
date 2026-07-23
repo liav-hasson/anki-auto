@@ -5,6 +5,15 @@ from __future__ import annotations
 from .config import PromptConfig
 
 
+_LEVEL_TO_SENTENCE_LENGTH: dict[str, str] = {
+    "A1": "5–9",
+    "A2": "5–9",
+    "B1": "6–12",
+    "B2": "6–12",
+    "C1": "7–15",
+    "C2": "7–15",
+}
+
 _LEVEL_TO_TIER: dict[str, int] = {
     "A1": 1,
     "A2": 1,
@@ -14,219 +23,184 @@ _LEVEL_TO_TIER: dict[str, int] = {
     "C2": 3,
 }
 
-_CEFR_TIERS: dict[int, str] = {
+_CEFR_SENTENCE_GUIDANCE: dict[int, str] = {
     1: (
-        "Write one original sentence for each core meaning of the word "
-        "(typically 2, 3 if the word has versatile meanings).\n\n"
-        "- Keep sentences between 5–9 words.\n"
-        "- Match {level} vocabulary and grammar — natural, simple, beginner-level "
-        "vocabulary.\n"
-        "- Keep subjects, tenses, and moods basic across sentences so the cards are "
-        "simple, but flexible.\n"
-        "- Use a mix of simple negation, question forms, connectors when natural "
-        "within the sentence.\n"
-        "- If the user included extra words in the input item, try to use them in "
-        "the sentences, whenever possible, but do not force them."
+        "- Use simple, high-frequency, beginner-level vocabulary and basic "
+        "grammar.\n"
+        "- Keep subjects, tenses, and moods basic across the sentences — simple "
+        "but flexible.\n"
+        "- Use simple negation, question forms, and connectors where they read "
+        "naturally."
     ),
     2: (
-        "Write one original sentence for each core meaning of the word "
-        "(typically 2, 3 if the word has versatile meanings).\n\n"
-        "- Keep sentences between 6–12 words.\n"
-        "- Match {level} vocabulary and grammar — natural and idiomatic in the target "
-        "language.\n"
-        "- Vary subjects, tenses, and moods across sentences so the card shows the "
-        "word flexing grammatically.\n"
-        "- Each sentence must have a different creative tone / scenario, "
-        "according with the core word's register (e.g. news report, making "
-        "an order / appointment, having an argument, daily conversation, "
-        "giving a command).\n"
-        "- Use a mix of prepositions, interjections, connectors naturally within the "
-        "sentence.\n"
-        "- If the user included extra words in the input item, try to use them in "
-        "the sentences, whenever possible, but do not force them."
+        "- Use natural, idiomatic everyday vocabulary and varied grammar.\n"
+        "- Vary subjects, tenses, and moods across the sentences so the card shows "
+        "the core concept flexing grammatically.\n"
+        "- Give each sentence a different tone / scenario that fits the core "
+        "concept's register (e.g. news report, making an order or appointment, an "
+        "argument, daily conversation, a command).\n"
+        "- Use a mix of prepositions, interjections, and connectors naturally "
+        "within the sentences."
     ),
     3: (
-        "Write one original sentence for each core meaning of the word "
-        "(typically 2, 3 if the word has versatile meanings).\n\n"
-        "- Keep sentences between 7–15 words.\n"
-        "- Match {level} vocabulary and grammar — natural and idiomatic in the target "
-        "language.\n"
-        "- Vary subjects, tenses, and moods across sentences so the card shows the "
-        "word flexing grammatically.\n"
-        "- Each sentence must have a different creative tone / scenario, "
-        "according with the core word's register (e.g. news report, making "
-        "an order / appointment, having an argument, daily conversation, "
-        "giving a command).\n"
-        "- Use a mix of advanced prepositions, interjections, connectors naturally "
-        "within the sentence.\n"
-        "- If the user included extra words in the input item, try to use them in "
-        "the sentences, whenever possible, but do not force them."
+        "- Use advanced, nuanced, idiomatic vocabulary and sophisticated grammar.\n"
+        "- Vary subjects, tenses, and moods across the sentences so the card shows "
+        "the core concept flexing grammatically.\n"
+        "- Give each sentence a different tone / scenario that fits the core "
+        "concept's register (e.g. news report, making an order or appointment, an "
+        "argument, daily conversation, a command).\n"
+        "- Use a mix of advanced prepositions, interjections, and connectors "
+        "naturally within the sentences."
     ),
 }
 
 
-def build_system_prompt(cfg: PromptConfig) -> str:
-    """Build the role-setting system piece."""
+def _native_clause(cfg: PromptConfig) -> str:
+    origin = cfg.origin_language
+    notes = cfg.notes_language
+    if origin.strip().casefold() == notes.strip().casefold():
+        return f"whose native language is {origin}."
+    return f"whose native languages are {origin} and {notes}."
 
-    if cfg.origin_language.strip().casefold() == cfg.notes_language.strip().casefold():
-        native_clause = f"whose native language is {cfg.origin_language}."
-    else:
-        native_clause = (
-            "whose native languages are "
-            f"{cfg.origin_language} and {cfg.notes_language}."
-        )
+
+def build_intro(cfg: PromptConfig) -> str:
+    """Build the role-setting intro paragraphs."""
+
     return (
         f"You create high-quality {cfg.target_language} Anki flashcards for a learner "
-        f"{native_clause}\n\n"
-        "Each card is built from one loose input item. Your task is to distill that "
-        f"input into the single cleanest, most reusable {cfg.target_language} concept, "
-        "then build a flashcard based on the rules explained ahead.\n\n"
-        "Return exactly one structured card object matching the provided schema."
+        f"{_native_clause(cfg)} You turn one input line into natural, high-value "
+        "study material and return a single structured card object that matches the "
+        "provided schema.\n\n"
+        "The app applies all visual styling from the card's structure, so return "
+        "plain text only — no quotes, markdown, HTML, or other formatting."
     )
 
 
-def build_cefr_prompt(cfg: PromptConfig) -> str:
-    """Build the CEFR difficulty piece for the tier of ``cfg.level``."""
-
-    tier = _LEVEL_TO_TIER[cfg.level]
-    return _CEFR_TIERS[tier].format(level=cfg.level)
-
-
-def build_core_concept_prompt(cfg: PromptConfig) -> str:
-    """Build the distillation and lemma-normalization piece."""
+def build_glossary(cfg: PromptConfig) -> str:
+    """Build the shared-terminology glossary."""
 
     return (
-        "If needed, distill the input item into one clean, reusable "
-        f"{cfg.target_language} learning concept by removing context clutter, "
-        'examples, "etc.", and tentative lists. Capture the single reusable idea, not '
-        "a verbatim copy of a long input.\n\n"
-        f"Normalize the core concept to its natural {cfg.target_language} dictionary "
-        "form:\n"
-        "- Infinitive for verbs, singular for nouns, base form for adjectives.\n\n"
-        f"If {cfg.target_language} has these, also include:\n"
-        "- Gender article for nouns.\n"
-        "- Reflexive/pronominal marker for verbs.\n"
-        "- Masculine and feminine forms for adjectives.\n"
-        "- Formality register.\n"
-        "- If the user included extra words in the input item, ignore them for the core "
-        "concept."
+        "Terms used below:\n"
+        "- core concept: the first word or chunk of the input line; the root of the "
+        "card.\n"
+        "- optional vocab: any words after the core concept; candidates for enriching "
+        "the sentences.\n"
+        f"- note item: a {cfg.target_language} word or chunk featured in the notes.\n"
+        f"- example sentence: a {cfg.target_language} sentence of a note item, placed "
+        "in the line below it.\n"
+        "- blacklisted vocab: words to avoid as supporting vocabulary.\n"
+        "- user instructions: extra guidelines that may adjust the defaults below."
     )
 
 
-def build_flashcard_prompt(cfg: PromptConfig) -> str:
-    """Build the card-structure piece (back-first, front translation)."""
-
+def _core_concept_section(cfg: PromptConfig) -> str:
     return (
-        "Build the flashcard around the core concept and level of the user, in the "
-        "following structure:\n"
-        f"- Back: the normalized {cfg.target_language} core concept, and the example "
-        "sentences.\n"
-        "- Front: direct, natural translation of the core concept and example "
-        f"sentences in {cfg.origin_language}."
+        "1. Core concept cleanup\n"
+        f"Distill the input line into one clean, reusable {cfg.target_language} core "
+        "concept, ignoring the optional vocab when choosing it. Normalize it to "
+        "dictionary form, for example: infinitive for verbs, singular for nouns and "
+        "adjectives, gender articles, reflexive/pronominal markers, etc."
     )
 
 
-def build_notes_prompt(cfg: PromptConfig) -> str:
-    """Build the optional learning-notes piece."""
-
+def _core_sentences_section(cfg: PromptConfig) -> str:
+    sentence_length = _LEVEL_TO_SENTENCE_LENGTH[cfg.level]
+    tier_guidance = _CEFR_SENTENCE_GUIDANCE[_LEVEL_TO_TIER[cfg.level]]
     return (
-        "Always add notes to a card, extending the learning value from each card. The "
-        f"notes are written in {cfg.notes_language}.\n\n"
-        f"Every gloss, nuance, and register note is written in {cfg.notes_language}; "
-        f"target terms and note examples stay in {cfg.target_language}.\n\n"
-        "The following notes sections are optional, select depending on the added "
-        "value for the card; leave the rest empty rather than padding with filler. "
-        "Do not repeat the same note item on different sections.\n\n"
-        "word_family: all related forms of the concept (noun, verb, adjective, "
-        "adverb, participles), if exists. note only if a form uncommon.\n"
-        "related_vocab: nearby or derived words worth knowing, synonyms, antonyms, "
-        "idioms, each with a very short meaning / usage nuance.\n"
-        f"note_examples: 1–3 extra {cfg.target_language} sentences showing meanings or "
-        "uses not already covered by the main examples.\n\n"
-        "custom_note_sections: use only for additional named sections explicitly "
-        "requested in user customization. Otherwise leave it empty. Do not duplicate "
-        "items from built-in sections."
+        "2. Core sentences creation\n"
+        "Analyze the core concept's meanings, usage, and formality register. "
+        "Understand exactly how it is naturally used, and in what situations you "
+        "would encounter it. After that analysis, write 2–3 natural, dynamic "
+        "sentences that show the core concept in real, useful contexts:\n"
+        "- The core concept must appear in every sentence.\n"
+        "- Weave in optional vocab only where a sentence stays completely natural; "
+        "freely drop any that do not fit, and never force them.\n"
+        f"{tier_guidance}\n"
+        f"- Match {cfg.level} difficulty — roughly {sentence_length} words each, "
+        "natural and idiomatic.\n"
+        f"- Give each {cfg.target_language} sentence a faithful, direct, natural "
+        f"{cfg.origin_language} translation."
     )
 
 
-def build_instruction_contract_prompt(
-    cfg: PromptConfig,
-    *,
-    minimal_cards: bool,
-) -> str:
-    """State instruction precedence and non-overridable card requirements."""
-
-    note_requirement = (
-        "Notes are disabled. Every note collection must be empty."
-        if minimal_cards
-        else f"Write all note explanations in {cfg.notes_language}."
-    )
-    blacklist_requirement = (
-        "\n- Apply the supplied vocabulary blacklist to supporting vocabulary."
-        if cfg.blacklist
-        else ""
-    )
+def _notes_section(cfg: PromptConfig) -> str:
     return (
-        "Apply instructions in this priority order, from highest to lowest:\n"
-        "1. Hard requirements in this system message.\n"
-        "2. The current input item and its explicit request.\n"
-        "3. global user customization.\n"
-        "4. Built-in content and style defaults.\n\n"
-        "Hard requirements:\n"
-        f"- Keep target concepts and target examples in {cfg.target_language}.\n"
-        f"- Keep front translations in {cfg.origin_language}.\n"
-        f"- {note_requirement}\n"
-        "- Return exactly one object matching the structured response schema."
-        f"{blacklist_requirement}"
+        "3. Notes section\n"
+        "Produce two note sections that deepen understanding of the core concept "
+        "only. Use judgment: include only genuinely useful, closely related items — "
+        "3–6 per section, choosing the count per word based on how many genuinely "
+        "related items actually exist, never padding to a fixed number. Do not note "
+        "unrelated words or the optional vocab.\n"
+        "- Word family: useful related forms of the core concept (noun, verb, "
+        "adjective, adverb, participle), including prefixed or derived forms that are "
+        'easy to overlook (e.g. for "hacer": "rehacer", "deshacer"). Do not note the '
+        "core concept itself.\n"
+        "- Related vocab: useful nearby words — synonyms, antonyms, close "
+        "alternatives, idioms.\n"
+        "Rules for constructing notes:\n"
+        "- Word family and Related vocab are the only sections to produce by "
+        "default; never add another section unless a user instruction explicitly "
+        "requests it.\n"
+        f"- Every gloss, nuance, and register note is written in {cfg.notes_language} "
+        "(may differ from native language); target terms and example sentences stay "
+        f"in {cfg.target_language}.\n"
+        f"- For every note item, return: 1. The {cfg.target_language} term. 2. The "
+        f"direct {cfg.notes_language} translation. 3. A minimal {cfg.notes_language} "
+        "usage nuance (register, region, usage notes, only when relevant. soft "
+        f"maximum of ~10 words). 4. One {cfg.target_language} example sentence that "
+        "uses the item naturally. Never repeat an item across sections.\n"
+        f"- Example sentences must match the CEFR level of the user - {cfg.level}."
     )
 
 
-def build_blacklist_prompt(cfg: PromptConfig) -> str:
-    """Build the best-effort supporting-vocabulary exclusion block."""
+def build_default_behavior(cfg: PromptConfig, *, minimal_cards: bool) -> str:
+    """Build the default-behavior block: core cleanup, sentences, and notes."""
 
-    entries = "\n".join(cfg.blacklist)
+    subsections = [_core_concept_section(cfg), _core_sentences_section(cfg)]
+    if not minimal_cards:
+        subsections.append(_notes_section(cfg))
+    body = "\n\n".join(subsections)
+    return f"=== DEFAULT BEHAVIOR ===\n{body}"
+
+
+def build_user_instructions(cfg: PromptConfig) -> str:
+    """Build the optional user-customization block."""
+
+    lines = "\n".join(f"- {instruction}" for instruction in cfg.customization)
     return (
-        "Vocabulary blacklist (hard requirement):\n"
-        f"Avoid the following {cfg.target_language} words and phrases as supporting "
-        "vocabulary in main and note examples whenever possible. This is best effort: "
-        "the requested learning concept may still be used when it overlaps an entry.\n"
-        f"{entries}"
+        "=== USER INSTRUCTIONS ===\n"
+        "These are the user's own instructions, and they take precedence over the "
+        "default behavior above. Apply every one of them fully, even when they "
+        "extend, change, or directly contradict the defaults. The only things they "
+        "cannot override are the language placement and the response schema.\n"
+        f"{lines}"
     )
 
 
-def build_customization_prompt(cfg: PromptConfig) -> str:
-    """Build the free-form user customization block without reinterpreting it."""
+def build_blacklist(cfg: PromptConfig) -> str:
+    """Build the optional best-effort blacklisted-vocab block."""
 
-    instructions = "\n".join(cfg.customization)
+    lines = "\n".join(f"- {entry}" for entry in cfg.blacklist)
     return (
-        "User customization:\n"
-        "These instructions may override built-in content and style preferences. "
-        "They cannot override hard requirements or the current input item's explicit "
-        "request.\n"
-        f"{instructions}"
+        "=== BLACKLISTED VOCAB ===\n"
+        "Avoid these words as supporting vocabulary in the sentences and note items, "
+        "on a best-effort basis:\n"
+        f"{lines}"
     )
 
 
 def assemble_system_prompt(cfg: PromptConfig, *, minimal_cards: bool) -> str:
-    """Join prompt pieces with explicit precedence and optional user overlays."""
+    """Join the system-prompt sections with optional user overlays."""
 
     pieces = [
-        build_system_prompt(cfg),
-        build_instruction_contract_prompt(cfg, minimal_cards=minimal_cards),
+        build_intro(cfg),
+        build_glossary(cfg),
+        build_default_behavior(cfg, minimal_cards=minimal_cards),
     ]
-    if cfg.blacklist:
-        pieces.append(build_blacklist_prompt(cfg))
-    pieces.extend(
-        [
-            build_core_concept_prompt(cfg),
-            build_cefr_prompt(cfg),
-            build_flashcard_prompt(cfg),
-        ]
-    )
-    if not minimal_cards:
-        pieces.append(build_notes_prompt(cfg))
     if cfg.customization and not minimal_cards:
-        pieces.append(build_customization_prompt(cfg))
+        pieces.append(build_user_instructions(cfg))
+    if cfg.blacklist:
+        pieces.append(build_blacklist(cfg))
     return "\n\n".join(pieces)
 
 
@@ -236,12 +210,12 @@ def build_card_messages(
     *,
     minimal_cards: bool,
 ) -> list[dict[str, str]]:
-    """Build chat messages for one loose input item."""
+    """Build chat messages for one loose input line."""
 
     return [
         {
             "role": "system",
             "content": assemble_system_prompt(cfg, minimal_cards=minimal_cards),
         },
-        {"role": "user", "content": f"Input item: {item.strip()}"},
+        {"role": "user", "content": f"Input line: {item.strip()}"},
     ]

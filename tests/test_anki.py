@@ -83,27 +83,29 @@ def test_build_note_escapes_fields_and_adds_audio() -> None:
 
     card = generated_card(
         word_family=[
-            {"target": "un sommeil", "gloss": "sleep", "note": "Use <le>, not la."}
+            {
+                "term": "un sommeil",
+                "translation": "sleep",
+                "nuance": "Use <le>, not la.",
+                "example": "Le sommeil est important.",
+            }
         ]
     )
     note = build_note(card, build_model("Test Model"), ["sleep-1.mp3", "sleep-2.mp3"])
 
     assert len(note.fields) == 3
     assert note.fields[0].startswith("<b>Dormir</b><br><br>")
-    assert "<b>Dormir</b>" in note.fields[0]
     assert "Duermo ocho horas." in note.fields[0]
     assert "<br><br>Ella duerme mal esta noche." in note.fields[0]
     assert note.fields[1].startswith("<b>Dormir</b><br><br>")
-    assert "<b>Dormir</b>" in note.fields[1]
     assert "<br><br>Je dors huit heures." in note.fields[1]
     assert '<span style="font-style: italic;">Je dors huit heures.' not in note.fields[1]
     assert "#39ff14" in note.fields[1]
     assert "<br><br><b>--- NOTES ---</b><br><b>Word family</b>" in note.fields[1]
     assert "<br><br><b>--- NOTES ---</b><br><br>" not in note.fields[1]
-    assert "<b>Word family</b>" in note.fields[1]
     assert "<b>Related vocab</b>" in note.fields[1]
-    assert "<b>Examples</b>" in note.fields[1]
-    assert "Use &lt;le&gt;, not la." in note.fields[1]
+    assert "<b>Examples</b>" not in note.fields[1]
+    assert "<u>Un sommeil</u>: sleep (<i>Use &lt;le&gt;, not la.</i>)" in note.fields[1]
     assert note.fields[2] == "[sound:sleep-1.mp3] [sound:sleep-2.mp3]"
     assert note.tags == []
 
@@ -156,15 +158,23 @@ def test_structured_note_french_terms_are_underlined() -> None:
     note = build_note(generated_card(), build_model("Test Model"))
 
     assert "<u>Un sommeil</u>: sleep" in note.fields[1]
-    assert "<u>Se réveiller</u>: to wake up (opposite action)" in note.fields[1]
+    assert (
+        "<u>Se réveiller</u>: to wake up (<i>opposite action</i>)" in note.fields[1]
+    )
 
 
-def test_note_with_colon_underlines_only_before_first_colon() -> None:
-    """Colon-based note rendering should only underline the leading term."""
+def test_note_translation_with_colon_keeps_term_underline_only() -> None:
+    """A colon inside the translation must not extend the underlined term."""
 
     note = build_note(
         generated_card(
-            word_family=[{"target": "heure", "gloss": "clock time: not duration."}]
+            word_family=[
+                {
+                    "term": "heure",
+                    "translation": "clock time: not duration.",
+                    "example": "Quelle heure est-il?",
+                }
+            ]
         ),
         build_model("Test Model"),
     )
@@ -183,11 +193,22 @@ def test_rendered_lines_start_capitalized() -> None:
             {"target": "je dors huit heures.", "origin": "duermo ocho horas."},
             {"target": "elle dort mal ce soir.", "origin": "ella duerme mal esta noche."},
         ],
-        word_family=[{"target": "un sommeil", "gloss": "sleep", "note": None}],
-        related_vocab=[
-            {"target": "se réveiller", "gloss": "to wake up", "nuance": "opposite action"}
+        word_family=[
+            {
+                "term": "un sommeil",
+                "translation": "sleep",
+                "nuance": None,
+                "example": "le sommeil est important.",
+            }
         ],
-        note_examples=["le bébé dort déjà."],
+        related_vocab=[
+            {
+                "term": "se réveiller",
+                "translation": "to wake up",
+                "nuance": "opposite action",
+                "example": "je me réveille tôt.",
+            }
+        ],
     )
 
     note = build_note(card, build_model("Test Model"))
@@ -203,20 +224,20 @@ def test_rendered_lines_start_capitalized() -> None:
     assert all(line[0].isupper() for line in sentence_lines if line[0].isalpha())
 
 
-def test_main_examples_are_plain_but_note_examples_are_styled() -> None:
-    """Only note examples should receive neon green italic styling."""
+def test_main_examples_are_plain_but_note_item_examples_are_styled() -> None:
+    """Only note-item examples should receive neon green italic styling."""
 
     note = build_note(generated_card(), build_model("Test Model"))
 
     main_example = "Je dors huit heures."
     note_example = (
         '<span style="color: #39ff14; font-style: italic;">'
-        '"Le bébé dort déjà."</span>'
+        '"Le sommeil est important."</span>'
     )
 
     assert main_example in note.fields[1]
     assert note_example in note.fields[1]
-    assert '<u>"Le bébé dort déjà."</u>' not in note.fields[1]
+    assert '<u>"Le sommeil est important."</u>' not in note.fields[1]
     main_examples_html = note.fields[1].split(
         "<br><br><b>--- NOTES ---</b>", maxsplit=1
     )[0]
@@ -256,7 +277,6 @@ def test_empty_note_sections_are_omitted() -> None:
     assert "<b>--- NOTES ---</b>" not in note.fields[1]
     assert "<b>Word family</b>" not in note.fields[1]
     assert "<b>Related vocab</b>" not in note.fields[1]
-    assert "<b>Examples</b>" not in note.fields[1]
 
 
 def test_write_apkg_creates_file_without_audio(tmp_path: Path) -> None:
@@ -342,21 +362,38 @@ def test_write_apkg_keeps_existing_output_when_package_write_fails(
     assert leftovers == []
 
 
-def test_custom_note_sections_render_after_built_in_sections_and_escape_html() -> None:
+def test_custom_sections_render_after_built_in_sections_and_escape_html() -> None:
+    """Custom sections follow built-in sections with escaped bold titles."""
+
     card = generated_card(
-        custom_note_sections=[
+        custom_sections=[
             {
                 "title": "Common <mistakes>",
-                "items": ["faire <x>: avoid & replace"],
+                "items": [
+                    {
+                        "term": "faire <x>",
+                        "translation": "avoid & replace",
+                        "example": "Il faut faire attention.",
+                    }
+                ],
             },
-            {"title": "Pronunciation", "items": ["dormir: /dɔʁ.miʁ/"]},
+            {
+                "title": "Pronunciation",
+                "items": [
+                    {
+                        "term": "dormir",
+                        "translation": "sleep",
+                        "example": "Je vais dormir.",
+                    }
+                ],
+            },
         ]
     )
 
     note = build_note(card, build_model("Test Model"))
     back = note.fields[1]
 
-    assert back.index("<b>Examples</b>") < back.index(
+    assert back.index("<b>Related vocab</b>") < back.index(
         "<b>Common &lt;mistakes&gt;</b>"
     )
     assert back.index("<b>Common &lt;mistakes&gt;</b>") < back.index(
@@ -366,9 +403,20 @@ def test_custom_note_sections_render_after_built_in_sections_and_escape_html() -
 
 
 def test_custom_sections_can_create_the_only_notes_block() -> None:
+    """A custom section alone still produces the notes block and its title."""
+
     overrides = empty_note_section_kwargs()
-    overrides["custom_note_sections"] = [
-        {"title": "Pronunciation", "items": ["dormir: /dɔʁ.miʁ/"]}
+    overrides["custom_sections"] = [
+        {
+            "title": "Pronunciation",
+            "items": [
+                {
+                    "term": "dormir",
+                    "translation": "sleep",
+                    "example": "Je vais dormir.",
+                }
+            ],
+        }
     ]
     note = build_note(generated_card(**overrides), build_model("Test Model"))
 
@@ -376,10 +424,21 @@ def test_custom_sections_can_create_the_only_notes_block() -> None:
     assert "<b>Pronunciation</b>" in note.fields[1]
 
 
-def test_minimal_cards_hide_custom_note_sections() -> None:
+def test_minimal_cards_hide_custom_sections() -> None:
+    """Minimal cards drop custom sections along with the rest of the notes."""
+
     card = generated_card(
-        custom_note_sections=[
-            {"title": "Pronunciation", "items": ["dormir: /dɔʁ.miʁ/"]}
+        custom_sections=[
+            {
+                "title": "Pronunciation",
+                "items": [
+                    {
+                        "term": "dormir",
+                        "translation": "sleep",
+                        "example": "Je vais dormir.",
+                    }
+                ],
+            }
         ]
     )
 
@@ -387,3 +446,81 @@ def test_minimal_cards_hide_custom_note_sections() -> None:
 
     assert "<b>--- NOTES ---</b>" not in note.fields[1]
     assert "<b>Pronunciation</b>" not in note.fields[1]
+
+
+def test_custom_section_title_renders_bold_above_its_items() -> None:
+    """A custom section renders a bold title with underlined note-item terms."""
+
+    card = generated_card(
+        custom_sections=[
+            {
+                "title": "Key collocations",
+                "items": [
+                    {
+                        "term": "dormir a pierna suelta",
+                        "translation": "to sleep soundly",
+                        "example": "Anoche dormí a pierna suelta.",
+                    }
+                ],
+            }
+        ]
+    )
+
+    back = build_note(card, build_model("Test Model")).fields[1]
+
+    assert (
+        "<b>Key collocations</b><br>"
+        "<u>Dormir a pierna suelta</u>: to sleep soundly<br>"
+    ) in back
+
+
+def test_note_item_nuance_renders_italic() -> None:
+    """A note item's nuance renders italic inside parentheses."""
+
+    back = build_note(generated_card(), build_model("Test Model")).fields[1]
+
+    assert "(<i>opposite action</i>)" in back
+
+
+def test_note_item_without_nuance_omits_parenthetical() -> None:
+    """A note item with no nuance shows only its term, translation, and example."""
+
+    card = generated_card(
+        word_family=[
+            {
+                "term": "un sommeil",
+                "translation": "sleep",
+                "nuance": None,
+                "example": "Le sommeil est important.",
+            }
+        ]
+    )
+
+    back = build_note(card, build_model("Test Model")).fields[1]
+
+    assert (
+        "<u>Un sommeil</u>: sleep<br>"
+        '<span style="color: #39ff14; font-style: italic;">'
+        '"Le sommeil est important."</span>'
+    ) in back
+    assert "<u>Un sommeil</u>: sleep (<i>" not in back
+
+
+def test_every_note_item_renders_a_green_italic_quoted_example() -> None:
+    """Every note item shows its example on the line below, green and italic."""
+
+    card = generated_card()
+    back = build_note(card, build_model("Test Model")).fields[1]
+
+    expected_examples = [
+        item.example for item in (*card.word_family, *card.related_vocab)
+    ]
+    assert expected_examples
+    for example in expected_examples:
+        block = (
+            '<span style="color: #39ff14; font-style: italic;">'
+            f'"{example}"</span>'
+        )
+        assert block in back
+    green_spans = back.count('<span style="color: #39ff14; font-style: italic;">')
+    assert green_spans == len(expected_examples)

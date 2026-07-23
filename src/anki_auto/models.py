@@ -5,14 +5,18 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-GLOSS_DESCRIPTION = "Notes-language translation."
-
-
 def _clean_text(value: str) -> str:
     cleaned = value.strip()
     if not cleaned:
         raise ValueError("value must not be blank")
     return cleaned
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 class ExamplePair(BaseModel):
@@ -33,45 +37,24 @@ class ExamplePair(BaseModel):
         return _clean_text(value)
 
 
-class TranslationEntry(BaseModel):
-    """A target-language term and its notes-language gloss with an optional note."""
+class NoteItem(BaseModel):
+    """A target-language term with its translation, nuance, and example."""
 
     model_config = ConfigDict(extra="forbid")
 
-    target: str = Field(description="Target-language word or short phrase.")
-    gloss: str = Field(description=GLOSS_DESCRIPTION)
-    note: str | None = Field(default=None, description="Short optional usage note.")
-
-    @field_validator("target", "gloss")
-    @classmethod
-    def require_text(cls, value: str) -> str:
-        """Reject blank translation text and trim surrounding whitespace."""
-
-        return _clean_text(value)
-
-    @field_validator("note")
-    @classmethod
-    def normalize_note(cls, value: str | None) -> str | None:
-        """Trim optional note text and collapse blank values to None."""
-
-        return _clean_optional_text(value)
-
-
-class RelatedVocabEntry(BaseModel):
-    """A related target-language term with optional usage nuance."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    target: str = Field(description="Related target-language word or phrase.")
-    gloss: str = Field(description=GLOSS_DESCRIPTION)
+    term: str = Field(description="Target-language word or short phrase.")
+    translation: str = Field(description="Notes-language translation of the term.")
     nuance: str | None = Field(
-        default=None, description="Short notes-language nuance note."
+        default=None, description="Short optional notes-language usage nuance."
+    )
+    example: str = Field(
+        description="Target-language example sentence using the term."
     )
 
-    @field_validator("target", "gloss")
+    @field_validator("term", "translation", "example")
     @classmethod
     def require_text(cls, value: str) -> str:
-        """Reject blank related-word text and trim surrounding whitespace."""
+        """Reject blank note-item text and trim surrounding whitespace."""
 
         return _clean_text(value)
 
@@ -83,11 +66,24 @@ class RelatedVocabEntry(BaseModel):
         return _clean_optional_text(value)
 
 
-def _clean_optional_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    return cleaned or None
+class CustomSection(BaseModel):
+    """A user-requested note section with structured note items."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(description="Notes-language heading for this custom section.")
+    items: list[NoteItem] = Field(
+        min_length=1,
+        max_length=8,
+        description="Note items belonging to this custom section.",
+    )
+
+    @field_validator("title")
+    @classmethod
+    def require_title(cls, value: str) -> str:
+        """Reject a blank custom-section title."""
+
+        return _clean_text(value)
 
 
 class GeneratedCard(BaseModel):
@@ -109,27 +105,20 @@ class GeneratedCard(BaseModel):
         max_length=3,
         description="Main target-language examples with origin-language translations.",
     )
-    word_family: list[TranslationEntry] = Field(
+    word_family: list[NoteItem] = Field(
         default_factory=list,
         max_length=6,
-        description="Useful target-language word-family entries with glosses.",
+        description="Related target-language forms of the core concept.",
     )
-    related_vocab: list[RelatedVocabEntry] = Field(
+    related_vocab: list[NoteItem] = Field(
         default_factory=list,
         max_length=8,
-        description=(
-            "Related target-language forms and nearby words with glosses and nuance."
-        ),
+        description="Nearby target-language words worth learning with the concept.",
     )
-    note_examples: list[str] = Field(
-        default_factory=list,
-        max_length=3,
-        description="Extra target-language example sentences for the notes section.",
-    )
-    custom_note_sections: list["CustomNoteSection"] = Field(
+    custom_sections: list[CustomSection] = Field(
         default_factory=list,
         max_length=6,
-        description="Additional named note sections explicitly requested by the user.",
+        description="Additional note sections explicitly requested by the user.",
     )
 
     @field_validator("source", "target_core", "origin_core")
@@ -138,37 +127,3 @@ class GeneratedCard(BaseModel):
         """Reject blank top-level text and trim surrounding whitespace."""
 
         return _clean_text(value)
-
-    @field_validator("note_examples")
-    @classmethod
-    def require_text_items(cls, values: list[str]) -> list[str]:
-        """Reject blank text items and trim surrounding whitespace."""
-
-        return [_clean_text(value) for value in values]
-
-
-class CustomNoteSection(BaseModel):
-    """A user-requested note section with plain structured items."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    title: str = Field(description="Notes-language heading for this custom section.")
-    items: list[str] = Field(
-        min_length=1,
-        max_length=8,
-        description="Plain-text items belonging to this custom note section.",
-    )
-
-    @field_validator("title")
-    @classmethod
-    def require_title(cls, value: str) -> str:
-        """Reject a blank custom-section title."""
-
-        return _clean_text(value)
-
-    @field_validator("items")
-    @classmethod
-    def require_items(cls, values: list[str]) -> list[str]:
-        """Reject blank custom-section items and trim surrounding whitespace."""
-
-        return [_clean_text(value) for value in values]

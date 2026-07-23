@@ -25,14 +25,33 @@ def card_kwargs(**overrides: Any) -> dict[str, Any]:
             },
         ],
         "word_family": [
-            {"target": "un sommeil", "gloss": "sleep", "note": None},
-            {"target": "dormi", "gloss": "slept", "note": "past participle"},
+            {
+                "term": "un sommeil",
+                "translation": "sleep",
+                "nuance": None,
+                "example": "Le sommeil est important.",
+            },
+            {
+                "term": "dormi",
+                "translation": "slept",
+                "nuance": "past participle",
+                "example": "Il a dormi longtemps.",
+            },
         ],
         "related_vocab": [
-            {"target": "se réveiller", "gloss": "to wake up", "nuance": "opposite action"},
-            {"target": "une chambre", "gloss": "a bedroom", "nuance": "place for sleep"},
+            {
+                "term": "se réveiller",
+                "translation": "to wake up",
+                "nuance": "opposite action",
+                "example": "Je me réveille tôt.",
+            },
+            {
+                "term": "une chambre",
+                "translation": "a bedroom",
+                "nuance": "place for sleep",
+                "example": "Ma chambre est calme.",
+            },
         ],
-        "note_examples": ["Le bébé dort déjà.", "Elle a bien dormi."],
     }
     values.update(overrides)
     return values
@@ -50,6 +69,5 @@ def empty_note_section_kwargs() -> dict[str, list[Any]]:
     return {
         "word_family": [],
         "related_vocab": [],
-        "note_examples": [],
-        "custom_note_sections": [],
+        "custom_sections": [],
     }

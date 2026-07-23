@@ -408,8 +408,17 @@ def test_main_handles_keyboard_interrupt(
 
 def test_minimal_card_generator_clears_all_note_collections() -> None:
     parsed_card = generated_card(
-        custom_note_sections=[
-            {"title": "Common mistakes", "items": ["Avoid this form."]}
+        custom_sections=[
+            {
+                "title": "Common mistakes",
+                "items": [
+                    {
+                        "term": "dormir profondément",
+                        "translation": "to sleep deeply",
+                        "example": "Il dort profondément.",
+                    }
+                ],
+            }
         ]
     )
     completion = SimpleNamespace(
@@ -437,14 +446,22 @@ def test_minimal_card_generator_clears_all_note_collections() -> None:
 
     assert card.word_family == []
     assert card.related_vocab == []
-    assert card.note_examples == []
-    assert card.custom_note_sections == []
+    assert card.custom_sections == []
 
 
 def test_card_generator_clears_custom_sections_without_customization() -> None:
     parsed_card = generated_card(
-        custom_note_sections=[
-            {"title": "Unrequested", "items": ["Must not survive."]}
+        custom_sections=[
+            {
+                "title": "Unrequested",
+                "items": [
+                    {
+                        "term": "dormir",
+                        "translation": "to sleep",
+                        "example": "Voy a dormir.",
+                    }
+                ],
+            }
         ]
     )
     completion = SimpleNamespace(
@@ -469,7 +486,7 @@ def test_card_generator_clears_custom_sections_without_customization() -> None:
 
     card = generator.generate("sleep")
 
-    assert card.custom_note_sections == []
+    assert card.custom_sections == []
     assert card.word_family == parsed_card.word_family
 
 

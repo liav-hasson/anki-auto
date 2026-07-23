@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.5.0] - 2026-07-23
+
+### Changed
+
+- Reworked card generation around a shared vocabulary (core concept, optional vocab, note
+  items) and CEFR-tiered sentence guidance (A1–A2 simple, B1–B2 idiomatic, C1–C2 advanced).
+- Restructured notes: every note item under Word family and Related vocab now carries its
+  own translation, a brief usage nuance, and an example sentence directly beneath it.
+- Note content is judgment-based — 3–6 items per section, chosen by how many genuinely
+  related items exist — instead of padding to a fixed count, and stays focused on the core
+  concept.
+- All visual styling (bold headers, underlined terms, green-italic example sentences, italic
+  nuances) is now applied in code from the card's structure; the model returns plain text.
+  This also fixes stray underlines on notes that contain a colon.
+- `customization.txt` instructions now take precedence over the built-in defaults (add or
+  remove sections, note the optional vocab, change the note count, and so on).
+- Input lines are read as a core concept followed by optional vocab (woven in only when
+  natural), replacing per-item free-form requests.
+
+### Added
+
+- `examples/items.example.txt` template for the input file.
+
+### Removed
+
+- The standalone extra-examples note section (examples now appear under each note item).
+
 ## [0.4.0] - 2026-07-23
 
 ### Added
