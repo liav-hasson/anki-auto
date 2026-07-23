@@ -126,6 +126,11 @@ class GeneratedCard(BaseModel):
         max_length=3,
         description="Extra target-language example sentences for the notes section.",
     )
+    custom_note_sections: list["CustomNoteSection"] = Field(
+        default_factory=list,
+        max_length=6,
+        description="Additional named note sections explicitly requested by the user.",
+    )
 
     @field_validator("source", "target_core", "origin_core")
     @classmethod
@@ -138,5 +143,32 @@ class GeneratedCard(BaseModel):
     @classmethod
     def require_text_items(cls, values: list[str]) -> list[str]:
         """Reject blank text items and trim surrounding whitespace."""
+
+        return [_clean_text(value) for value in values]
+
+
+class CustomNoteSection(BaseModel):
+    """A user-requested note section with plain structured items."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(description="Notes-language heading for this custom section.")
+    items: list[str] = Field(
+        min_length=1,
+        max_length=8,
+        description="Plain-text items belonging to this custom note section.",
+    )
+
+    @field_validator("title")
+    @classmethod
+    def require_title(cls, value: str) -> str:
+        """Reject a blank custom-section title."""
+
+        return _clean_text(value)
+
+    @field_validator("items")
+    @classmethod
+    def require_items(cls, values: list[str]) -> list[str]:
+        """Reject blank custom-section items and trim surrounding whitespace."""
 
         return [_clean_text(value) for value in values]

@@ -51,4 +51,5 @@ def empty_note_section_kwargs() -> dict[str, list[Any]]:
         "word_family": [],
         "related_vocab": [],
         "note_examples": [],
+        "custom_note_sections": [],
     }

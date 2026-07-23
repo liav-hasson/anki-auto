@@ -1,0 +1,6 @@
+# Optional target-language vocabulary to avoid, one word or phrase per line.
+# Lines starting with # are ignored. Delete the leading # to enable an entry.
+# Examples:
+# libro
+# ventana
+# chien

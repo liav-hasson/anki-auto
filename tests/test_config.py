@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -139,6 +141,60 @@ def test_cefr_level_still_rejects_invalid_after_normalization(
         Settings(_env_file=None)
 
 
+def test_reasoning_effort_defaults_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reasoning effort is unset by default so the API parameter is omitted."""
+
+    _set_required_env(monkeypatch)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.reasoning_effort is None
+
+
+def test_reasoning_effort_accepts_valid_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A supported reasoning effort is accepted."""
+
+    _set_required_env(monkeypatch, ANKI_REASONING_EFFORT="high")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.reasoning_effort == "high"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("HIGH", "high"), (" medium ", "medium")],
+)
+def test_reasoning_effort_is_normalized(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: str
+) -> None:
+    """Uppercase and padded reasoning efforts are normalized before validation."""
+
+    _set_required_env(monkeypatch, ANKI_REASONING_EFFORT=raw)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.reasoning_effort == expected
+
+
+def test_reasoning_effort_blank_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A blank reasoning effort is treated as unset (None)."""
+
+    _set_required_env(monkeypatch, ANKI_REASONING_EFFORT="   ")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.reasoning_effort is None
+
+
+def test_reasoning_effort_invalid_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unsupported reasoning effort fails validation."""
+
+    _set_required_env(monkeypatch, ANKI_REASONING_EFFORT="turbo")
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
 
 def test_blank_language_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """A blank language name is rejected."""
@@ -193,3 +249,36 @@ def test_load_settings_does_not_warn_for_provided_var(
 
     captured = capsys.readouterr()
     assert "ANKI_TEXT_MODEL" not in captured.err
+
+
+def test_prompt_file_paths_have_defaults_and_accept_env_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _set_required_env(monkeypatch)
+    custom_path = tmp_path / "my-customization.txt"
+    blacklist_path = tmp_path / "my-blacklist.txt"
+    monkeypatch.setenv("ANKI_CUSTOMIZATION_PATH", str(custom_path))
+    monkeypatch.setenv("ANKI_BLACKLIST_PATH", str(blacklist_path))
+
+    settings = Settings(_env_file=None)
+
+    assert settings.customization_path == custom_path
+    assert settings.blacklist_path == blacklist_path
+
+
+def test_prompt_file_path_defaults_do_not_emit_default_setting_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_required_env(monkeypatch)
+
+    settings = load_settings()
+
+    captured = capsys.readouterr()
+    assert settings.customization_path == Path("customization.txt")
+    assert settings.blacklist_path == Path("blacklist.txt")
+    assert "ANKI_CUSTOMIZATION_PATH not set" not in captured.err
+    assert "ANKI_BLACKLIST_PATH not set" not in captured.err

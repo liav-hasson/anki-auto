@@ -3,12 +3,15 @@
 import pytest
 from pydantic import ValidationError
 
-from anki_auto.config import PromptConfig
+from anki_auto.config import PromptConfig, Settings
 from anki_auto.models import GeneratedCard
 from anki_auto.prompt import (
     assemble_system_prompt,
+    build_blacklist_prompt,
     build_card_messages,
     build_cefr_prompt,
+    build_customization_prompt,
+    build_instruction_contract_prompt,
     build_notes_prompt,
     build_system_prompt,
 )
@@ -189,3 +192,150 @@ def test_generated_card_rejects_blank_note_items() -> None:
 
     with pytest.raises(ValidationError):
         GeneratedCard(**card_kwargs(note_examples=[" "]))
+
+
+def test_generated_card_accepts_bounded_custom_note_sections() -> None:
+    card = generated_card(
+        custom_note_sections=[
+            {
+                "title": "Common mistakes",
+                "items": ["Do not confuse dormir with dormirse."],
+            }
+        ]
+    )
+
+    assert card.custom_note_sections[0].title == "Common mistakes"
+    assert card.custom_note_sections[0].items == [
+        "Do not confuse dormir with dormirse."
+    ]
+
+
+@pytest.mark.parametrize(
+    "custom_sections",
+    [
+        [{"title": " ", "items": ["Valid item"]}],
+        [{"title": "Valid title", "items": []}],
+        [{"title": "Valid title", "items": [" "]}],
+        [{"title": f"Section {index}", "items": ["Item"]} for index in range(7)],
+        [{"title": "Too many items", "items": [str(index) for index in range(9)]}],
+    ],
+)
+def test_generated_card_rejects_invalid_custom_note_sections(
+    custom_sections: list[dict[str, object]],
+) -> None:
+    with pytest.raises(ValidationError):
+        GeneratedCard(
+            **card_kwargs(custom_note_sections=custom_sections)
+        )
+
+
+def test_settings_prompt_config_carries_immutable_prompt_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANKI_ORIGIN_LANGUAGE", "Spanish")
+    monkeypatch.setenv("ANKI_TARGET_LANGUAGE", "French")
+    monkeypatch.setenv("ANKI_NOTES_LANGUAGE", "English")
+    monkeypatch.setenv("ANKI_CEFR_LEVEL", "A2")
+    settings = Settings(_env_file=None)
+
+    cfg = settings.prompt_config(
+        customization=("Add pronunciation.",),
+        blacklist=("chien",),
+    )
+
+    assert cfg.customization == ("Add pronunciation.",)
+    assert cfg.blacklist == ("chien",)
+
+
+def test_prompt_omits_unavailable_overlay_blocks() -> None:
+    prompt = assemble_system_prompt(_prompt_config(), minimal_cards=False)
+
+    assert "User customization" not in prompt
+    assert "Vocabulary blacklist" not in prompt
+
+
+def test_customization_preserves_order_and_follows_built_in_defaults() -> None:
+    cfg = PromptConfig(
+        origin_language="Spanish",
+        target_language="French",
+        notes_language="English",
+        level="A2",
+        customization=("Add pronunciation.", "Keep explanations short."),
+    )
+
+    prompt = assemble_system_prompt(cfg, minimal_cards=False)
+    customization_block = build_customization_prompt(cfg)
+
+    assert customization_block in prompt
+    assert prompt.index("Always add notes to a card") < prompt.index(
+        "User customization"
+    )
+    assert prompt.index("Add pronunciation.") < prompt.index(
+        "Keep explanations short."
+    )
+    assert "may override built-in content and style preferences" in prompt
+    assert "cannot override hard requirements" in prompt
+
+
+def test_customization_is_dropped_in_minimal_mode_but_kept_otherwise() -> None:
+    cfg = PromptConfig(
+        origin_language="Spanish",
+        target_language="French",
+        notes_language="English",
+        level="A2",
+        customization=("Add pronunciation.",),
+    )
+
+    minimal = assemble_system_prompt(cfg, minimal_cards=True)
+    full = assemble_system_prompt(cfg, minimal_cards=False)
+
+    assert "User customization" not in minimal
+    assert "Add pronunciation." not in minimal
+    assert "User customization" in full
+
+
+def test_blacklist_is_a_best_effort_hard_requirement_with_core_exemption() -> None:
+    cfg = PromptConfig(
+        origin_language="Spanish",
+        target_language="French",
+        notes_language="English",
+        level="A2",
+        blacklist=("chien", "aller au restaurant"),
+    )
+
+    prompt = assemble_system_prompt(cfg, minimal_cards=False)
+    blacklist_block = build_blacklist_prompt(cfg)
+
+    assert blacklist_block in prompt
+    assert "Vocabulary blacklist (hard requirement)" in prompt
+    assert "chien\naller au restaurant" in prompt
+    assert "main and note examples" in prompt
+    assert "requested learning concept" in prompt
+    assert "best effort" in prompt
+
+
+def test_instruction_contract_gives_item_request_priority_over_customization() -> None:
+    cfg = PromptConfig(
+        origin_language="Spanish",
+        target_language="French",
+        notes_language="English",
+        level="A2",
+        customization=("Prefer formal examples.",),
+    )
+
+    contract = build_instruction_contract_prompt(cfg, minimal_cards=True)
+
+    assert "current input item and its explicit request" in contract
+    assert "global user customization" in contract
+    assert contract.index("current input item") < contract.index(
+        "global user customization"
+    )
+    assert "Every note collection must be empty" in contract
+
+
+def test_notes_prompt_reserves_custom_sections_for_explicit_requests() -> None:
+    prompt = build_notes_prompt(_prompt_config())
+
+    assert "custom_note_sections" in prompt
+    assert "only for additional named sections explicitly requested" in prompt

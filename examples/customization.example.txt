@@ -1,0 +1,6 @@
+# Optional generation preferences, one instruction per line.
+# Lines starting with # are ignored. Delete the leading # to enable an instruction.
+# Examples:
+# Keep nuances and explanations short in the notes (max 5 words each).
+# Write notes in parentheses (word family, related words), not only the core concept.
+# For each noted unique word, write an example sentence using it, right under the word.

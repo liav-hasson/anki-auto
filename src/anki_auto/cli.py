@@ -26,6 +26,11 @@ from .config import Settings, load_settings
 from .models import GeneratedCard
 from .openai_cards import OpenAICardGenerator
 from .options import AudioOptions, PackagingOptions
+from .prompt_files import (
+    PromptFileContent,
+    PromptFiles,
+    read_optional_prompt_file,
+)
 
 
 DEFAULT_NOTE_MODEL_NAME = "Anki Auto Notes v2"
@@ -84,16 +89,27 @@ def _run(settings: Settings) -> RunResult:
     """Execute the happy-path workflow after settings have loaded."""
 
     items = read_input_items(settings.input_path)
+    prompt_files = load_prompt_files(settings)
     output_path = resolve_output_path(
         settings.output_path, overwrite=settings.overwrite_output
     )
 
-    if not confirm_run(settings, len(items), output_path=output_path):
+    if not confirm_run(
+        settings,
+        len(items),
+        prompt_files=prompt_files,
+        output_path=output_path,
+    ):
         logging_utils.warning("Aborted by user.")
         return RunResult()
 
     client = OpenAI(api_key=settings.openai_api_key)
-    cards = generate_cards(items, settings, client=client)
+    cards = generate_cards(
+        items,
+        settings,
+        client=client,
+        prompt_files=prompt_files,
+    )
 
     with tempfile.TemporaryDirectory(prefix="anki-auto-media-") as media_dir:
         packaged_cards = package_cards_with_audio(
@@ -122,20 +138,84 @@ def _run(settings: Settings) -> RunResult:
     return RunResult(card_count=len(cards), output_path=output_path)
 
 
+def load_prompt_files(settings: Settings) -> PromptFiles:
+    """Load both optional prompt files and warn when either is unavailable."""
+
+    prompt_files = PromptFiles(
+        customization=read_optional_prompt_file(
+            settings.customization_path,
+            setting_name="ANKI_CUSTOMIZATION_PATH",
+        ),
+        blacklist=read_optional_prompt_file(
+            settings.blacklist_path,
+            setting_name="ANKI_BLACKLIST_PATH",
+        ),
+    )
+    _warn_unavailable_prompt_file(
+        prompt_files.customization,
+        label="Customization",
+        active_content_name="instructions",
+    )
+    _warn_unavailable_prompt_file(
+        prompt_files.blacklist,
+        label="Blacklist",
+        active_content_name="entries",
+    )
+    if settings.minimal_cards and prompt_files.customization.lines:
+        logging_utils.warning(
+            "Minimal-cards mode (ANKI_MINIMAL_CARDS) is on; customization file "
+            f"'{prompt_files.customization.path}' will be ignored."
+        )
+    return prompt_files
+
+
+def _warn_unavailable_prompt_file(
+    content: PromptFileContent,
+    *,
+    label: str,
+    active_content_name: str,
+) -> None:
+    feature = label.casefold()
+    if not content.found:
+        logging_utils.warning(
+            f"{label} file not found; {feature} will not be used. "
+            f"Expected path: {content.path}"
+        )
+    elif not content.lines:
+        logging_utils.warning(
+            f"{label} file has no active {active_content_name}; "
+            f"{feature} will not be used. Path: {content.path}"
+        )
+
+
+def _prompt_file_status(content: PromptFileContent) -> str:
+    if not content.found:
+        return "not found"
+    line_count = len(content.lines)
+    unit = "line" if line_count == 1 else "lines"
+    return f"{line_count} active {unit}"
+
+
 def confirm_run(
     settings: Settings,
     item_count: int,
     *,
+    prompt_files: PromptFiles,
     output_path: Path | None = None,
 ) -> bool:
     """Show the resolved run summary and gate paid generation on confirmation.
 
-    Returns ``True`` when generation should proceed and ``False`` when the user
-    declines interactively. Raises :class:`ConfirmationUnavailableError` when
+    Return ``True`` when generation should proceed and ``False`` when the user
+    declines interactively. Raise :class:`ConfirmationUnavailableError` when
     confirmation is required but no interactive terminal is available.
     """
 
-    _print_run_summary(settings, item_count, output_path=output_path)
+    _print_run_summary(
+        settings,
+        item_count,
+        prompt_files=prompt_files,
+        output_path=output_path,
+    )
 
     if settings.assume_yes:
         logging_utils.info("Proceeding without confirmation (ANKI_ASSUME_YES).")
@@ -156,33 +236,44 @@ def _print_run_summary(
     settings: Settings,
     item_count: int,
     *,
+    prompt_files: PromptFiles,
     output_path: Path | None = None,
 ) -> None:
     """Print the resolved run configuration before paid generation begins."""
 
     resolved_output_path = output_path if output_path is not None else settings.output_path
     if settings.generate_audio:
-        audio_line = (
-            f"audio model:     {settings.audio_model} (voice: {settings.audio_voice})"
-        )
+        audio_value = f"on (model: {settings.audio_model}, voice: {settings.audio_voice})"
     else:
-        audio_line = "audio:           disabled"
-    for line in (
-        "About to generate cards with the following settings:",
-        f"  origin language: {settings.origin_language}",
-        f"  target language: {settings.target_language}",
-        f"  notes language:  {settings.notes_language}",
-        f"  CEFR level:      {settings.cefr_level}",
-        f"  text model:      {settings.text_model}",
-        f"  {audio_line}",
-        f"  deck name:       {settings.deck_name}",
-        f"  input path:      {settings.input_path}",
-        f"  output path:     {resolved_output_path}",
-        f"  overwrite output:{' on' if settings.overwrite_output else ' off'}",
-        f"  minimal cards:   {'on' if settings.minimal_cards else 'off'}",
-        f"  items:           {item_count}",
-    ):
-        logging_utils.info(line)
+        audio_value = "off"
+    rows = [
+        ("origin language", settings.origin_language),
+        ("target language", settings.target_language),
+        ("notes language", settings.notes_language),
+        ("CEFR level", settings.cefr_level),
+        ("text model", settings.text_model),
+        ("audio", audio_value),
+        ("deck name", settings.deck_name),
+        ("input path", settings.input_path),
+        ("output path", resolved_output_path),
+        ("overwrite output", "on" if settings.overwrite_output else "off"),
+        ("minimal cards", "on" if settings.minimal_cards else "off"),
+        (
+            "customization",
+            f"{prompt_files.customization.path} "
+            f"({_prompt_file_status(prompt_files.customization)})",
+        ),
+        (
+            "blacklist",
+            f"{prompt_files.blacklist.path} "
+            f"({_prompt_file_status(prompt_files.blacklist)})",
+        ),
+        ("items", item_count),
+    ]
+    label_width = max(len(label) for label, _ in rows)
+    logging_utils.info("About to generate cards with the following settings:")
+    for label, value in rows:
+        logging_utils.info(f"  {label + ':':<{label_width + 1}} {value}")
 
 
 def resolve_output_path(path: Path, *, overwrite: bool) -> Path:
@@ -250,16 +341,24 @@ def read_input_items(input_path: Path) -> list[str]:
 
 
 def generate_cards(
-    items: list[str], settings: Settings, *, client: OpenAI
+    items: list[str],
+    settings: Settings,
+    *,
+    client: OpenAI,
+    prompt_files: PromptFiles,
 ) -> list[GeneratedCard]:
-    """Generate cards for all input items concurrently, preserving input order."""
+    """Generate cards concurrently using one immutable prompt-file snapshot."""
 
     generator = OpenAICardGenerator(
-        prompt_config=settings.prompt_config(),
+        prompt_config=settings.prompt_config(
+            customization=prompt_files.customization.lines,
+            blacklist=prompt_files.blacklist.lines,
+        ),
         minimal_cards=settings.minimal_cards,
         model=settings.text_model,
         api_key=settings.openai_api_key,
         client=client,
+        reasoning_effort=settings.reasoning_effort,
     )
     total = len(items)
     cards: list[GeneratedCard] = []

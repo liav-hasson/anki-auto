@@ -71,10 +71,38 @@ No extra formatting / styling was done.
 1. Copy the example environment file:
 
    ```bash
-   cp .env.example .env
+   cp examples/.env.example .env
    ```
 
 2. Set the required variables in `.env` (read below for the [value guide](#variables)).
+
+### Customize generated cards
+
+Both files below are **optional**. The tool reads `customization.txt` and `blacklist.txt`
+from the repo root by default; to start from the shipped templates, copy them into the root:
+
+```bash
+cp examples/customization.example.txt customization.txt
+cp examples/blacklist.example.txt blacklist.txt
+```
+
+`customization.txt` accepts any extra instructions per line. Blank lines and
+lines beginning with `#` are ignored. Instructions can request pronunciation, guide how
+extra input words are used, shorten notes, or request additional sections. They may
+override built-in content preferences, but cannot override language placement, structured
+output, the current item's explicit request, blacklist rules, or minimal-card mode.
+
+`blacklist.txt` accepts one word or phrase per line using the same comment
+syntax. The model is asked to avoid those entries as supporting vocabulary in main and note
+examples. The requested learning concept is exempt when it overlaps an entry.
+
+Both files are optional UTF-8 text files with an 8 KiB limit. Missing files and files with
+no active lines produce a warning before confirmation and are not included in the prompt.
+Unreadable, invalid UTF-8, or oversized files stop the run before any API request.
+
+When `ANKI_MINIMAL_CARDS=true`, `customization.txt` is ignored entirely and has no effect
+on the card; if a non-empty customization file is present, a warning is shown before the
+run. The blacklist still applies to the example sentences.
 
 ### Add your input and run
 
@@ -106,14 +134,17 @@ No extra formatting / styling was done.
 | `ANKI_NOTES_LANGUAGE` | Language the notes are written in. | **Yes** | — | Any language name, e.g. `English` |
 | `ANKI_CEFR_LEVEL` | Target proficiency level; drives sentence difficulty. | **Yes** | — | `A1` `A2` `B1` `B2` `C1` `C2` (case-insensitive) |
 | `ANKI_TEXT_MODEL` | OpenAI model used to generate card text. | No | `gpt-4.1-mini` | Any [text model](https://platform.openai.com/docs/models) id. Better models generally produce better sentences and notes. |
+| `ANKI_REASONING_EFFORT` | Optional [reasoning effort](https://developers.openai.com/api/docs/guides/reasoning) for reasoning-capable models (e.g. `gpt-5.5`); omitted when unset, so the default non-reasoning `gpt-4.1-mini` is unaffected and won't error. | No | (unset) | Model-dependent: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` - check the model's page. |
 | `ANKI_AUDIO_MODEL` | OpenAI model used for text-to-speech. | No | `gpt-4o-mini-tts` | Any [TTS model](https://platform.openai.com/docs/models) id |
 | `ANKI_AUDIO_VOICE` | Voice used for audio. | No | `alloy` | A [supported voice](https://platform.openai.com/docs/guides/text-to-speech) (e.g. `alloy`, `echo`, `nova`, `shimmer`) |
 | `ANKI_DECK_NAME` | Name of the generated Anki deck. | No | `Anki Auto Deck` | Any text |
 | `ANKI_INPUT_PATH` | Path to the input file (one item per line; blank and `#` lines are ignored). | No | `items.txt` | Any file path |
 | `ANKI_OUTPUT_PATH` | Path of the generated `.apkg`. | No | `deck.apkg` | Any file path |
+| `ANKI_CUSTOMIZATION_PATH` | Optional UTF-8 file of free-form generation instructions, one per active line. | No | `customization.txt` | File path; maximum 8 KiB |
+| `ANKI_BLACKLIST_PATH` | Optional UTF-8 file of target-language words or phrases to avoid in examples. | No | `blacklist.txt` | File path; maximum 8 KiB |
 | `ANKI_CONCURRENCY` | Number of parallel OpenAI requests. Higher is faster but hits rate limits sooner. | No | `5` | Integer `>= 1` |
 | `ANKI_GENERATE_AUDIO` | Generate audio for each main example sentence. | No | `true` | boolean* |
-| `ANKI_MINIMAL_CARDS` | Sentences only (core + examples, no notes). | No | `false` | boolean* |
+| `ANKI_MINIMAL_CARDS` | Sentences only (core + examples, no notes); customization.txt is ignored. | No | `false` | boolean* |
 | `ANKI_ASSUME_YES` | Skip the confirmation prompt (for automation / non-interactive use). | No | `false` | boolean* |
 | `ANKI_OVERWRITE_OUTPUT` | Overwrite an existing output file instead of writing `<name>_1.apkg`. | No | `false` | boolean* |
 

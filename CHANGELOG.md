@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.4.0] - 2026-07-23
+
+### Added
+
+- Optional free-form card customization through `customization.txt`.
+- Optional best-effort target-vocabulary exclusions through `blacklist.txt`.
+- Bounded custom note sections that preserve structured output and safe HTML rendering.
+- Optional `ANKI_REASONING_EFFORT` to raise reasoning effort on reasoning-capable models
+  (e.g. `gpt-5.5`); omitted when unset so the default `gpt-4.1-mini` is unaffected.
+- Example templates under `examples/` (`customization.example.txt`, `blacklist.example.txt`,
+  `.env.example`) plus README steps to copy them into the project root.
+
+### Changed
+
+- Preflight now reports auxiliary prompt-file status and warns before confirmation when
+  customization or blacklist content is unavailable.
+- Minimal-card generation now clears note content returned by the model before packaging.
+- Pre-run summary shows an explicit audio on/off state and aligns every row to one column.
+- `ANKI_MINIMAL_CARDS` now ignores `customization.txt` entirely (it no longer affects the
+  core concept or examples); a warning is shown when a customization file is skipped.
+- Live `customization.txt` / `blacklist.txt` are now git-ignored; tracked templates live in
+  `examples/`.
+
 ## [0.3.0] - 2026-07-13
 
 ### Added

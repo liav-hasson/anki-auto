@@ -340,3 +340,50 @@ def test_write_apkg_keeps_existing_output_when_package_write_fails(
     assert output_path.read_bytes() == b"original package"
     leftovers = [path for path in tmp_path.iterdir() if path.name.startswith(".deck.apkg")]
     assert leftovers == []
+
+
+def test_custom_note_sections_render_after_built_in_sections_and_escape_html() -> None:
+    card = generated_card(
+        custom_note_sections=[
+            {
+                "title": "Common <mistakes>",
+                "items": ["faire <x>: avoid & replace"],
+            },
+            {"title": "Pronunciation", "items": ["dormir: /dɔʁ.miʁ/"]},
+        ]
+    )
+
+    note = build_note(card, build_model("Test Model"))
+    back = note.fields[1]
+
+    assert back.index("<b>Examples</b>") < back.index(
+        "<b>Common &lt;mistakes&gt;</b>"
+    )
+    assert back.index("<b>Common &lt;mistakes&gt;</b>") < back.index(
+        "<b>Pronunciation</b>"
+    )
+    assert "<u>Faire &lt;x&gt;</u>: avoid &amp; replace" in back
+
+
+def test_custom_sections_can_create_the_only_notes_block() -> None:
+    overrides = empty_note_section_kwargs()
+    overrides["custom_note_sections"] = [
+        {"title": "Pronunciation", "items": ["dormir: /dɔʁ.miʁ/"]}
+    ]
+    note = build_note(generated_card(**overrides), build_model("Test Model"))
+
+    assert "<b>--- NOTES ---</b>" in note.fields[1]
+    assert "<b>Pronunciation</b>" in note.fields[1]
+
+
+def test_minimal_cards_hide_custom_note_sections() -> None:
+    card = generated_card(
+        custom_note_sections=[
+            {"title": "Pronunciation", "items": ["dormir: /dɔʁ.miʁ/"]}
+        ]
+    )
+
+    note = build_note(card, build_model("Test Model"), minimal_cards=True)
+
+    assert "<b>--- NOTES ---</b>" not in note.fields[1]
+    assert "<b>Pronunciation</b>" not in note.fields[1]

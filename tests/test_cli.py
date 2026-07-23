@@ -11,8 +11,10 @@ from openai import AuthenticationError
 
 from anki_auto.cli import (
     DEFAULT_NOTE_MODEL_NAME,
+    _run,
     confirm_run,
     generate_cards,
+    load_prompt_files,
     main,
     package_cards_with_audio,
     read_input_items,
@@ -21,6 +23,7 @@ from anki_auto.cli import (
 from anki_auto.config import Settings
 from anki_auto.openai_cards import OpenAICardGenerator
 from anki_auto.options import AudioOptions
+from anki_auto.prompt_files import PromptFileContent, PromptFiles
 from tests.factories import generated_card
 
 _REQUIRED_ENV_VARS = (
@@ -40,6 +43,29 @@ def _set_valid_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANKI_TARGET_LANGUAGE", "French")
     monkeypatch.setenv("ANKI_NOTES_LANGUAGE", "English")
     monkeypatch.setenv("ANKI_CEFR_LEVEL", "A2")
+
+
+def _resolved_prompt_files(
+    customization_path: Path,
+    blacklist_path: Path,
+    *,
+    customization: tuple[str, ...] = (),
+    blacklist: tuple[str, ...] = (),
+    customization_found: bool = True,
+    blacklist_found: bool = True,
+) -> PromptFiles:
+    return PromptFiles(
+        customization=PromptFileContent(
+            path=customization_path,
+            lines=customization,
+            found=customization_found,
+        ),
+        blacklist=PromptFileContent(
+            path=blacklist_path,
+            lines=blacklist,
+            found=blacklist_found,
+        ),
+    )
 
 
 
@@ -71,11 +97,20 @@ def test_confirm_run_prints_resolved_output_and_overwrite_state(
     monkeypatch.setenv("ANKI_OVERWRITE_OUTPUT", "false")
     settings = Settings(_env_file=None)
     resolved_output_path = tmp_path / "deck_1.apkg"
+    prompt_files = _resolved_prompt_files(
+        Path("customization.txt"),
+        Path("blacklist.txt"),
+    )
 
-    assert confirm_run(settings, 3, output_path=resolved_output_path) is True
+    assert confirm_run(
+        settings,
+        3,
+        prompt_files=prompt_files,
+        output_path=resolved_output_path,
+    ) is True
 
     captured = capsys.readouterr()
-    assert f"[INFO]   output path:     {resolved_output_path}" in captured.err
+    assert f"[INFO]   output path:      {resolved_output_path}" in captured.err
     assert "[INFO]   overwrite output: off" in captured.err
 
 
@@ -176,6 +211,8 @@ def test_card_generator_threads_api_key_with_injected_client() -> None:
             target_language="French",
             notes_language="English",
             level="A2",
+            customization=(),
+            blacklist=(),
         ),
         api_key="sk-test",
         client=fake_client,
@@ -183,6 +220,73 @@ def test_card_generator_threads_api_key_with_injected_client() -> None:
 
     assert generator.api_key == "sk-test"
     assert generator.generate("sleep") == expected_card
+
+
+def test_card_generator_omits_reasoning_effort_when_unset() -> None:
+    """With no reasoning effort configured, the API call omits the parameter."""
+
+    expected_card = generated_card(source="sleep")
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(parsed=expected_card))]
+    )
+    captured: dict[str, object] = {}
+
+    def _parse(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return completion
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(parse=_parse))
+    )
+    generator = OpenAICardGenerator(
+        prompt_config=SimpleNamespace(
+            origin_language="Spanish",
+            target_language="French",
+            notes_language="English",
+            level="A2",
+            customization=(),
+            blacklist=(),
+        ),
+        client=fake_client,
+    )
+
+    generator.generate("sleep")
+
+    assert "reasoning_effort" not in captured
+
+
+def test_card_generator_passes_reasoning_effort_when_set() -> None:
+    """A configured reasoning effort is forwarded to the API call."""
+
+    expected_card = generated_card(source="sleep")
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(parsed=expected_card))]
+    )
+    captured: dict[str, object] = {}
+
+    def _parse(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return completion
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(parse=_parse))
+    )
+    generator = OpenAICardGenerator(
+        prompt_config=SimpleNamespace(
+            origin_language="Spanish",
+            target_language="French",
+            notes_language="English",
+            level="A2",
+            customization=(),
+            blacklist=(),
+        ),
+        client=fake_client,
+        reasoning_effort="high",
+    )
+
+    generator.generate("sleep")
+
+    assert captured["reasoning_effort"] == "high"
 
 
 def test_main_invalid_cefr_level_echoes_offending_value(
@@ -302,6 +406,73 @@ def test_main_handles_keyboard_interrupt(
     assert "Traceback" not in captured.err
 
 
+def test_minimal_card_generator_clears_all_note_collections() -> None:
+    parsed_card = generated_card(
+        custom_note_sections=[
+            {"title": "Common mistakes", "items": ["Avoid this form."]}
+        ]
+    )
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed_card))]
+    )
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(parse=lambda **_: completion)
+        )
+    )
+    generator = OpenAICardGenerator(
+        prompt_config=SimpleNamespace(
+            origin_language="Spanish",
+            target_language="French",
+            notes_language="English",
+            level="A2",
+            customization=(),
+            blacklist=(),
+        ),
+        minimal_cards=True,
+        client=fake_client,
+    )
+
+    card = generator.generate("sleep")
+
+    assert card.word_family == []
+    assert card.related_vocab == []
+    assert card.note_examples == []
+    assert card.custom_note_sections == []
+
+
+def test_card_generator_clears_custom_sections_without_customization() -> None:
+    parsed_card = generated_card(
+        custom_note_sections=[
+            {"title": "Unrequested", "items": ["Must not survive."]}
+        ]
+    )
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed_card))]
+    )
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(parse=lambda **_: completion)
+        )
+    )
+    generator = OpenAICardGenerator(
+        prompt_config=SimpleNamespace(
+            origin_language="Spanish",
+            target_language="French",
+            notes_language="English",
+            level="A2",
+            customization=(),
+            blacklist=(),
+        ),
+        client=fake_client,
+    )
+
+    card = generator.generate("sleep")
+
+    assert card.custom_note_sections == []
+    assert card.word_family == parsed_card.word_family
+
+
 def _settings_with_concurrency(
     monkeypatch: pytest.MonkeyPatch, concurrency: int
 ) -> Settings:
@@ -337,8 +508,17 @@ def test_generate_cards_preserves_input_order_under_scrambled_completion(
     monkeypatch.setattr("anki_auto.cli.OpenAICardGenerator", _ScrambledGenerator)
     settings = _settings_with_concurrency(monkeypatch, 5)
     items = ["0", "1", "2", "3", "4"]
+    prompt_files = _resolved_prompt_files(
+        Path("customization.txt"),
+        Path("blacklist.txt"),
+    )
 
-    cards = generate_cards(items, settings, client=object())
+    cards = generate_cards(
+        items,
+        settings,
+        client=object(),
+        prompt_files=prompt_files,
+    )
 
     assert [card.source for card in cards] == items
     assert sorted(calls) == sorted(items)
@@ -362,8 +542,17 @@ def test_generate_cards_concurrency_one_still_works(
 
     monkeypatch.setattr("anki_auto.cli.OpenAICardGenerator", _FakeGenerator)
     settings = _settings_with_concurrency(monkeypatch, 1)
+    prompt_files = _resolved_prompt_files(
+        Path("customization.txt"),
+        Path("blacklist.txt"),
+    )
 
-    cards = generate_cards(["alpha", "beta"], settings, client=object())
+    cards = generate_cards(
+        ["alpha", "beta"],
+        settings,
+        client=object(),
+        prompt_files=prompt_files,
+    )
 
     assert [card.source for card in cards] == ["alpha", "beta"]
 
@@ -545,3 +734,229 @@ def test_confirm_run_interactive_empty_declines(
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "[WARNING] Aborted by user." in captured.err
+
+
+def test_load_prompt_files_warns_for_missing_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_valid_env(monkeypatch)
+    settings = Settings(_env_file=None)
+
+    prompt_files = load_prompt_files(settings)
+
+    captured = capsys.readouterr()
+    assert prompt_files.customization.found is False
+    assert prompt_files.blacklist.found is False
+    assert (
+        "[WARNING] Customization file not found; customization will not be used. "
+        "Expected path: customization.txt" in captured.err
+    )
+    assert (
+        "[WARNING] Blacklist file not found; blacklist will not be used. "
+        "Expected path: blacklist.txt" in captured.err
+    )
+
+
+def test_load_prompt_files_warns_for_explicit_missing_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_valid_env(monkeypatch)
+    customization_path = tmp_path / "missing-customization.txt"
+    blacklist_path = tmp_path / "missing-blacklist.txt"
+    monkeypatch.setenv("ANKI_CUSTOMIZATION_PATH", str(customization_path))
+    monkeypatch.setenv("ANKI_BLACKLIST_PATH", str(blacklist_path))
+
+    prompt_files = load_prompt_files(Settings(_env_file=None))
+
+    captured = capsys.readouterr()
+    assert prompt_files.customization.found is False
+    assert prompt_files.blacklist.found is False
+    assert f"Expected path: {customization_path}" in captured.err
+    assert f"Expected path: {blacklist_path}" in captured.err
+
+
+def test_load_prompt_files_warns_for_active_empty_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_valid_env(monkeypatch)
+    Path("customization.txt").write_text("# comments only\n", encoding="utf-8")
+    Path("blacklist.txt").write_text("\n# comments only\n", encoding="utf-8")
+
+    prompt_files = load_prompt_files(Settings(_env_file=None))
+
+    captured = capsys.readouterr()
+    assert prompt_files.customization.lines == ()
+    assert prompt_files.blacklist.lines == ()
+    assert "Customization file has no active instructions" in captured.err
+    assert "Blacklist file has no active entries" in captured.err
+
+
+def test_load_prompt_files_warns_when_minimal_ignores_customization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_valid_env(monkeypatch)
+    monkeypatch.setenv("ANKI_MINIMAL_CARDS", "true")
+    Path("customization.txt").write_text("Add pronunciation.\n", encoding="utf-8")
+
+    prompt_files = load_prompt_files(Settings(_env_file=None))
+
+    captured = capsys.readouterr()
+    assert prompt_files.customization.lines == ("Add pronunciation.",)
+    assert (
+        "Minimal-cards mode (ANKI_MINIMAL_CARDS) is on; customization file "
+        "'customization.txt' will be ignored." in captured.err
+    )
+
+
+def test_load_prompt_files_skips_minimal_customization_warning_without_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_valid_env(monkeypatch)
+    monkeypatch.setenv("ANKI_MINIMAL_CARDS", "true")
+
+    prompt_files = load_prompt_files(Settings(_env_file=None))
+
+    captured = capsys.readouterr()
+    assert prompt_files.customization.lines == ()
+    assert "will be ignored" not in captured.err
+
+
+def test_load_prompt_files_skips_minimal_customization_warning_when_full(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _set_valid_env(monkeypatch)
+    monkeypatch.setenv("ANKI_MINIMAL_CARDS", "false")
+    Path("customization.txt").write_text("Add pronunciation.\n", encoding="utf-8")
+
+    prompt_files = load_prompt_files(Settings(_env_file=None))
+
+    captured = capsys.readouterr()
+    assert prompt_files.customization.lines == ("Add pronunciation.",)
+    assert "will be ignored" not in captured.err
+
+
+def test_confirm_summary_shows_prompt_file_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _set_valid_env(monkeypatch)
+    monkeypatch.setenv("ANKI_ASSUME_YES", "true")
+    settings = Settings(_env_file=None)
+    prompt_files = _resolved_prompt_files(
+        tmp_path / "customization.txt",
+        tmp_path / "blacklist.txt",
+        customization=("Add pronunciation.",),
+        blacklist_found=False,
+    )
+
+    assert confirm_run(
+        settings,
+        3,
+        prompt_files=prompt_files,
+        output_path=tmp_path / "deck.apkg",
+    ) is True
+
+    captured = capsys.readouterr()
+    assert f"{tmp_path / 'customization.txt'} (1 active line)" in captured.err
+    assert f"{tmp_path / 'blacklist.txt'} (not found)" in captured.err
+
+
+def test_generate_cards_threads_prompt_file_lines_into_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _CapturingGenerator:  # pylint: disable=too-few-public-methods
+        def __init__(self, **kwargs: object) -> None:
+            captured["prompt_config"] = kwargs["prompt_config"]
+
+        def generate(self, item: str) -> object:
+            return generated_card(source=item)
+
+    monkeypatch.setattr("anki_auto.cli.OpenAICardGenerator", _CapturingGenerator)
+    settings = _settings_with_concurrency(monkeypatch, 1)
+    prompt_files = _resolved_prompt_files(
+        Path("customization.txt"),
+        Path("blacklist.txt"),
+        customization=("Add pronunciation.",),
+        blacklist=("chien",),
+    )
+
+    cards = generate_cards(
+        ["sleep"],
+        settings,
+        client=object(),
+        prompt_files=prompt_files,
+    )
+
+    cfg = captured["prompt_config"]
+    assert cfg.customization == ("Add pronunciation.",)
+    assert cfg.blacklist == ("chien",)
+    assert [card.source for card in cards] == ["sleep"]
+
+
+def test_main_rejects_invalid_auxiliary_utf8_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_confirm_run(monkeypatch, tmp_path)
+    customization_path = tmp_path / "customization.txt"
+    customization_path.write_bytes(b"\xff")
+    monkeypatch.setenv("ANKI_CUSTOMIZATION_PATH", str(customization_path))
+    _forbid_generate_cards(monkeypatch)
+
+    exit_code = main()
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "ANKI_CUSTOMIZATION_PATH" in captured.err
+    assert "UTF-8" in captured.err
+
+
+@pytest.mark.parametrize("minimal_cards", ["false", "true"])
+def test_run_emits_auxiliary_warnings_before_confirmation_in_both_notes_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    minimal_cards: str,
+) -> None:
+    _prepare_confirm_run(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANKI_MINIMAL_CARDS", minimal_cards)
+    settings = Settings(_env_file=None)
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        "anki_auto.cli.logging_utils.warning",
+        lambda message: events.append(message),
+    )
+
+    def _decline(*_args: object, **_kwargs: object) -> bool:
+        events.append("confirmation")
+        return False
+
+    monkeypatch.setattr("anki_auto.cli.confirm_run", _decline)
+
+    _run(settings)
+
+    assert events[0].startswith("Customization file not found")
+    assert events[1].startswith("Blacklist file not found")
+    assert events[2] == "confirmation"

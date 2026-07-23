@@ -13,6 +13,7 @@ from . import logging_utils
 
 
 CEFRLevel = Literal["A1", "A2", "B1", "B2", "C1", "C2"]
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 _DEFAULTED_WARN_FIELDS: dict[str, str] = {
     "text_model": "ANKI_TEXT_MODEL",
@@ -26,12 +27,14 @@ _DEFAULTED_WARN_FIELDS: dict[str, str] = {
 
 @dataclass(frozen=True)
 class PromptConfig:
-    """Minimal language view consumed by the prompt builders."""
+    """Language and user-owned content consumed by prompt builders."""
 
     origin_language: str
     target_language: str
     notes_language: str
     level: str
+    customization: tuple[str, ...] = ()
+    blacklist: tuple[str, ...] = ()
 
 
 class Settings(BaseSettings):
@@ -51,11 +54,14 @@ class Settings(BaseSettings):
     cefr_level: CEFRLevel
 
     text_model: str = "gpt-4.1-mini"
+    reasoning_effort: ReasoningEffort | None = None
     audio_model: str = "gpt-4o-mini-tts"
     audio_voice: str = "alloy"
     deck_name: str = "Anki Auto Deck"
     input_path: Path = Path("items.txt")
     output_path: Path = Path("deck.apkg")
+    customization_path: Path = Path("customization.txt")
+    blacklist_path: Path = Path("blacklist.txt")
 
     generate_audio: bool = True
     minimal_cards: bool = False
@@ -82,6 +88,18 @@ class Settings(BaseSettings):
             return value.strip().upper()
         return value
 
+    @field_validator("reasoning_effort", mode="before")
+    @classmethod
+    def normalize_reasoning_effort(cls, value: object) -> object:
+        """Accept case- and whitespace-insensitive effort; blank means unset."""
+
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip().lower()
+            return cleaned or None
+        return value
+
     @field_validator("origin_language", "target_language", "notes_language")
     @classmethod
     def require_language(cls, value: str) -> str:
@@ -105,14 +123,21 @@ class Settings(BaseSettings):
             raise ValueError("target_language must differ from notes_language")
         return self
 
-    def prompt_config(self) -> PromptConfig:
-        """Return the language view used by the prompt builders."""
+    def prompt_config(
+        self,
+        *,
+        customization: tuple[str, ...] = (),
+        blacklist: tuple[str, ...] = (),
+    ) -> PromptConfig:
+        """Return the immutable view used by prompt builders."""
 
         return PromptConfig(
             origin_language=self.origin_language,
             target_language=self.target_language,
             notes_language=self.notes_language,
             level=self.cefr_level,
+            customization=customization,
+            blacklist=blacklist,
         )
 
 

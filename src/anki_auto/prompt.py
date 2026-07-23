@@ -24,7 +24,9 @@ _CEFR_TIERS: dict[int, str] = {
         "- Keep subjects, tenses, and moods basic across sentences so the cards are "
         "simple, but flexible.\n"
         "- Use a mix of simple negation, question forms, connectors when natural "
-        "within the sentence."
+        "within the sentence.\n"
+        "- If the user included extra words in the input item, try to use them in "
+        "the sentences, whenever possible, but do not force them."
     ),
     2: (
         "Write one original sentence for each core meaning of the word "
@@ -39,7 +41,9 @@ _CEFR_TIERS: dict[int, str] = {
         "an order / appointment, having an argument, daily conversation, "
         "giving a command).\n"
         "- Use a mix of prepositions, interjections, connectors naturally within the "
-        "sentence."
+        "sentence.\n"
+        "- If the user included extra words in the input item, try to use them in "
+        "the sentences, whenever possible, but do not force them."
     ),
     3: (
         "Write one original sentence for each core meaning of the word "
@@ -54,7 +58,9 @@ _CEFR_TIERS: dict[int, str] = {
         "an order / appointment, having an argument, daily conversation, "
         "giving a command).\n"
         "- Use a mix of advanced prepositions, interjections, connectors naturally "
-        "within the sentence."
+        "within the sentence.\n"
+        "- If the user included extra words in the input item, try to use them in "
+        "the sentences, whenever possible, but do not force them."
     ),
 }
 
@@ -101,7 +107,9 @@ def build_core_concept_prompt(cfg: PromptConfig) -> str:
         "- Gender article for nouns.\n"
         "- Reflexive/pronominal marker for verbs.\n"
         "- Masculine and feminine forms for adjectives.\n"
-        "- Formality register."
+        "- Formality register.\n"
+        "- If the user included extra words in the input item, ignore them for the core "
+        "concept."
     )
 
 
@@ -134,21 +142,91 @@ def build_notes_prompt(cfg: PromptConfig) -> str:
         "related_vocab: nearby or derived words worth knowing, synonyms, antonyms, "
         "idioms, each with a very short meaning / usage nuance.\n"
         f"note_examples: 1–3 extra {cfg.target_language} sentences showing meanings or "
-        "uses not already covered by the main examples."
+        "uses not already covered by the main examples.\n\n"
+        "custom_note_sections: use only for additional named sections explicitly "
+        "requested in user customization. Otherwise leave it empty. Do not duplicate "
+        "items from built-in sections."
+    )
+
+
+def build_instruction_contract_prompt(
+    cfg: PromptConfig,
+    *,
+    minimal_cards: bool,
+) -> str:
+    """State instruction precedence and non-overridable card requirements."""
+
+    note_requirement = (
+        "Notes are disabled. Every note collection must be empty."
+        if minimal_cards
+        else f"Write all note explanations in {cfg.notes_language}."
+    )
+    blacklist_requirement = (
+        "\n- Apply the supplied vocabulary blacklist to supporting vocabulary."
+        if cfg.blacklist
+        else ""
+    )
+    return (
+        "Apply instructions in this priority order, from highest to lowest:\n"
+        "1. Hard requirements in this system message.\n"
+        "2. The current input item and its explicit request.\n"
+        "3. global user customization.\n"
+        "4. Built-in content and style defaults.\n\n"
+        "Hard requirements:\n"
+        f"- Keep target concepts and target examples in {cfg.target_language}.\n"
+        f"- Keep front translations in {cfg.origin_language}.\n"
+        f"- {note_requirement}\n"
+        "- Return exactly one object matching the structured response schema."
+        f"{blacklist_requirement}"
+    )
+
+
+def build_blacklist_prompt(cfg: PromptConfig) -> str:
+    """Build the best-effort supporting-vocabulary exclusion block."""
+
+    entries = "\n".join(cfg.blacklist)
+    return (
+        "Vocabulary blacklist (hard requirement):\n"
+        f"Avoid the following {cfg.target_language} words and phrases as supporting "
+        "vocabulary in main and note examples whenever possible. This is best effort: "
+        "the requested learning concept may still be used when it overlaps an entry.\n"
+        f"{entries}"
+    )
+
+
+def build_customization_prompt(cfg: PromptConfig) -> str:
+    """Build the free-form user customization block without reinterpreting it."""
+
+    instructions = "\n".join(cfg.customization)
+    return (
+        "User customization:\n"
+        "These instructions may override built-in content and style preferences. "
+        "They cannot override hard requirements or the current input item's explicit "
+        "request.\n"
+        f"{instructions}"
     )
 
 
 def assemble_system_prompt(cfg: PromptConfig, *, minimal_cards: bool) -> str:
-    """Join the prompt pieces in fixed order, omitting notes when minimal."""
+    """Join prompt pieces with explicit precedence and optional user overlays."""
 
     pieces = [
         build_system_prompt(cfg),
-        build_core_concept_prompt(cfg),
-        build_cefr_prompt(cfg),
-        build_flashcard_prompt(cfg),
+        build_instruction_contract_prompt(cfg, minimal_cards=minimal_cards),
     ]
+    if cfg.blacklist:
+        pieces.append(build_blacklist_prompt(cfg))
+    pieces.extend(
+        [
+            build_core_concept_prompt(cfg),
+            build_cefr_prompt(cfg),
+            build_flashcard_prompt(cfg),
+        ]
+    )
     if not minimal_cards:
         pieces.append(build_notes_prompt(cfg))
+    if cfg.customization and not minimal_cards:
+        pieces.append(build_customization_prompt(cfg))
     return "\n\n".join(pieces)
 
 

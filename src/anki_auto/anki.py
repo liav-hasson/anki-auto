@@ -226,13 +226,13 @@ def _note_example_block(value: str) -> str:
 
 
 def _render_notes(card: GeneratedCard) -> str:
-    note_sections = []
+    built_in_sections: list[str] = []
     if card.word_family:
-        note_sections.append(
+        built_in_sections.append(
             _render_note_section(NOTE_SECTION_LABELS["word_family"], card.word_family)
         )
     if card.related_vocab:
-        note_sections.append(
+        built_in_sections.append(
             _render_note_section(
                 NOTE_SECTION_LABELS["related_vocab"], card.related_vocab
             )
@@ -241,11 +241,18 @@ def _render_notes(card: GeneratedCard) -> str:
         rendered_examples = LINE_BREAK.join(
             _note_example_block(example) for example in card.note_examples
         )
-        note_sections.append(
+        built_in_sections.append(
             _section_header(NOTE_SECTION_LABELS["note_examples"])
             + LINE_BREAK
             + rendered_examples
         )
+
+    custom_sections: list[str] = []
+    if card.custom_note_sections:
+        for section in card.custom_note_sections:
+            custom_sections.append(_render_note_section(section.title, section.items))
+
+    note_sections = built_in_sections + custom_sections
 
     if not note_sections:
         return ""

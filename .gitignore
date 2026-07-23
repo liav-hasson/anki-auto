@@ -2,6 +2,10 @@
 *.apkg
 items.txt
 
+# User-owned prompt files (copy from examples/)
+customization.txt
+blacklist.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
